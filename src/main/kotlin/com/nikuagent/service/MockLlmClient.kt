@@ -68,5 +68,10 @@ class MockLlmClient : LlmClient {
 
         ---
         _⚠️ 이 결과는 Mock 응답입니다. 실제 LLM API 연동 후 정확한 분석이 제공됩니다._
+
+        ## 🔑 실제 분석을 시작하려면
+        1. **Settings (⌘,)** → **Tools** → **Niku Agent**
+        2. **OpenAI API Key** 입력 후 **Apply**
+        3. 다시 **Analyze with Niku Agent** 실행
     """.trimIndent()
 }
