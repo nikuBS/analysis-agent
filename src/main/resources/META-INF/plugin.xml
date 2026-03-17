@@ -1,0 +1,52 @@
+<idea-plugin>
+    <id>com.nikuagent.niku-agent</id>
+    <name>Niku Agent</name>
+    <version>0.1.0</version>
+    <vendor email="niku@example.com" url="https://github.com/niku/niku-agent">Niku</vendor>
+
+    <description><![CDATA[
+        <b>Niku Agent</b> — Frontend Code Analysis Plugin<br/><br/>
+        레거시 프론트엔드 프로젝트의 코드 동작 흐름을 빠르게 이해할 수 있도록 돕습니다.<br/>
+        React, TypeScript, JavaScript 파일에서 이벤트 핸들러, 상태 변화,
+        API 호출, 조건부 렌더링 흐름을 구조화하여 분석합니다.
+    ]]></description>
+
+    <!-- WebStorm / IntelliJ IDEA 호환 범위 -->
+    <idea-version since-build="241" until-build="243.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- JS/TS 파일 언어 감지에 필요 -->
+    <depends optional="true" config-file="niku-js.xml">JavaScript</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Tool Window: 분석 결과 패널 -->
+        <toolWindow
+            id="Niku Agent"
+            anchor="right"
+            factoryClass="com.nikuagent.ui.NikuToolWindowFactory"
+            icon="/icons/niku_icon.svg"
+            canCloseContents="false"
+        />
+
+        <!-- Application-level 서비스 -->
+        <applicationService
+            serviceImplementation="com.nikuagent.service.NikuAgentService"
+        />
+    </extensions>
+
+    <actions>
+        <!-- 에디터 우클릭 컨텍스트 메뉴에 액션 추가 -->
+        <action
+            id="NikuAgent.AnalyzeCurrentFile"
+            class="com.nikuagent.action.AnalyzeCurrentFileAction"
+            text="Analyze with Niku Agent"
+            description="현재 파일/선택 영역의 프론트엔드 코드 흐름을 분석합니다"
+            icon="/icons/niku_icon.svg"
+        >
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <!-- 키보드 단축키 -->
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt N"/>
+        </action>
+    </actions>
+</idea-plugin>
