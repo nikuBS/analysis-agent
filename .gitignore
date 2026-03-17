@@ -1,6 +1,7 @@
 # IDE
 .idea/
 *.iml
+.intellijPlatform/
 
 # Gradle
 .gradle/

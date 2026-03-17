@@ -81,9 +81,8 @@ object PromptBuilder {
         return "파일의 Import 목록:\n```\n${imports.joinToString("\n")}\n```\n"
     }
 
-    companion object {
-        // LLM 토큰 한도 대비 최대 컨텐츠 길이 (문자 기준)
-        // TODO: 실제 API 연동 시 모델별 토큰 한도에 맞게 조정
-        private const val MAX_CONTENT_LENGTH = 8_000
-    }
 }
+
+// LLM 토큰 한도 대비 최대 컨텐츠 길이 (문자 기준)
+// TODO: 실제 API 연동 시 모델별 토큰 한도에 맞게 조정
+private const val MAX_CONTENT_LENGTH = 8_000

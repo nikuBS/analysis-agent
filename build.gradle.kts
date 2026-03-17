@@ -28,6 +28,7 @@ dependencies {
         bundledPlugin("JavaScript") // JS/TS PSI 지원
         pluginVerifier()
         zipSigner()
+        instrumentationTools()
         testFramework(TestFrameworkType.Platform)
     }
 
