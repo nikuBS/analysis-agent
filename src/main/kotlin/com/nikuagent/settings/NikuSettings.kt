@@ -23,10 +23,22 @@ import com.intellij.openapi.components.service
 class NikuSettings : SimplePersistentStateComponent<NikuSettings.State>(State()) {
 
     class State : BaseState() {
-        // BaseState.string()은 String? 위임 — 빈 문자열 대신 null로 초기화
+        // LLM 제공사 선택: "openai" 또는 "anthropic"
+        var provider: String? by string("openai")
+
+        // OpenAI 설정
         var openAiApiKey: String? by string()
-        var model: String? by string("gpt-4o")
+        var openAiModel: String? by string("gpt-4o")
+
+        // Anthropic (Claude) 설정
+        var anthropicApiKey: String? by string()
+        var anthropicModel: String? by string("claude-sonnet-4-6")
+
         var maxTokens: Int by property(2048)
+
+        // 하위 호환: 기존 model 필드 → openAiModel로 이전
+        @Deprecated("openAiModel 사용")
+        var model: String? by string()
     }
 
     companion object {

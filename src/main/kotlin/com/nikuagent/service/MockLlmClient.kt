@@ -71,7 +71,9 @@ class MockLlmClient : LlmClient {
 
         ## 🔑 실제 분석을 시작하려면
         1. **Settings (⌘,)** → **Tools** → **Niku Agent**
-        2. **OpenAI API Key** 입력 후 **Apply**
-        3. 다시 **Analyze with Niku Agent** 실행
+        2. 사용할 **Provider** 선택 후 해당 **API Key** 입력
+           - OpenAI: `gpt-4o`, `gpt-4o-mini` 등
+           - Anthropic: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` 등
+        3. **Apply** 후 다시 **Analyze with Niku Agent** 실행
     """.trimIndent()
 }

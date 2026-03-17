@@ -25,12 +25,24 @@ class NikuAgentService {
      * Settings 화면에서 키를 저장하면 즉시 반영된다.
      */
     private fun resolveLlmClient(): LlmClient {
-        val settings = NikuSettings.getInstance().state
-        return if (!settings.openAiApiKey.isNullOrBlank()) {
-            OpenAiLlmClient(apiKey = settings.openAiApiKey!!, model = settings.model ?: "gpt-4o")
-        } else {
-            log.warn("Niku Agent: API 키 미설정 — Mock 응답을 사용합니다.")
-            MockLlmClient()
+        val s = NikuSettings.getInstance().state
+        return when (s.provider ?: "openai") {
+            "anthropic" -> {
+                if (!s.anthropicApiKey.isNullOrBlank()) {
+                    AnthropicLlmClient(apiKey = s.anthropicApiKey!!, model = s.anthropicModel ?: "claude-sonnet-4-6")
+                } else {
+                    log.warn("Niku Agent: Anthropic API 키 미설정 — Mock 응답을 사용합니다.")
+                    MockLlmClient()
+                }
+            }
+            else -> { // "openai"
+                if (!s.openAiApiKey.isNullOrBlank()) {
+                    OpenAiLlmClient(apiKey = s.openAiApiKey!!, model = s.openAiModel ?: "gpt-4o")
+                } else {
+                    log.warn("Niku Agent: OpenAI API 키 미설정 — Mock 응답을 사용합니다.")
+                    MockLlmClient()
+                }
+            }
         }
     }
 
