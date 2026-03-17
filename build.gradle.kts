@@ -45,7 +45,7 @@ intellijPlatform {
         version = providers.gradleProperty("pluginVersion")
         ideaVersion {
             sinceBuild = "241"
-            untilBuild = "243.*"
+            untilBuild = "253.*"
         }
     }
     signing {
