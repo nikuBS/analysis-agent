@@ -1,0 +1,16 @@
+# IDE
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 환경변수 (API 키 등)
+.env
+*.env.local
