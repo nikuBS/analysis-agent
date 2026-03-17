@@ -24,25 +24,21 @@ object ResultFormatter {
         val header = buildHeader(context)
         val body = convertMarkdownToHtml(rawResponse)
 
+        // JEditorPane 내장 CSS 파서는 지원 범위가 제한적:
+        // border-radius, border-bottom/top/left, overflow-x, -apple-system 등 미지원
         return """
             <html>
             <head>
             <style>
-              body { font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
-                     font-size: 13px; margin: 12px; color: #CDD6F4; background: #1E1E2E; }
-              h2 { color: #89B4FA; border-bottom: 1px solid #313244; padding-bottom: 4px; margin-top: 16px; }
-              h3 { color: #CBA6F7; }
-              code { background: #313244; color: #A6E3A1;
-                     padding: 1px 4px; border-radius: 3px; font-family: monospace; }
-              pre { background: #313244; padding: 10px; border-radius: 6px;
-                    overflow-x: auto; font-size: 12px; }
-              ul, ol { padding-left: 20px; }
+              body { font-family: Arial, sans-serif; font-size: 13px; margin: 12px; }
+              h2 { color: #2B6CB0; margin-top: 16px; margin-bottom: 4px; }
+              h3 { color: #553C9A; }
+              code { font-family: monospace; font-size: 12px; }
+              pre { font-family: monospace; font-size: 12px; margin: 8px 0; }
+              ul, ol { margin-left: 20px; }
               li { margin-bottom: 4px; }
-              .header { background: #313244; padding: 8px 12px;
-                        border-radius: 6px; margin-bottom: 16px;
-                        border-left: 3px solid #89B4FA; }
-              .warning { color: #FAB387; font-style: italic; }
-              hr { border: none; border-top: 1px solid #313244; margin: 12px 0; }
+              .header { margin-bottom: 12px; }
+              .warning { color: #C05621; font-style: italic; }
             </style>
             </head>
             <body>
