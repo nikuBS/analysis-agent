@@ -83,6 +83,70 @@ object PromptBuilder {
         return "분석할 선택 코드:\n```\n$selection\n```"
     }
 
+    /**
+     * 사용자가 직접 입력한 프롬프트를 기반으로 분석 요청을 생성한다.
+     * 파일(또는 선택 코드)을 컨텍스트로 포함하고, 사용자 질문을 주 지시로 사용한다.
+     */
+    fun buildCustom(context: FileContext, userPrompt: String): String {
+        val codeSection = if (context.selection != null) {
+            buildSelectedCodeSection(context.selection)
+        } else {
+            buildFullFileSection(context.fullContent)
+        }
+
+        val importsSection = if (context.imports.isNotEmpty()) buildImportsSection(context.imports) else ""
+
+        val focusNote = if (context.focusFunctionName != null) {
+            "특히 `${context.focusFunctionName}` 함수를 중심으로 답변해주세요.\n\n"
+        } else {
+            ""
+        }
+
+        return """
+            |당신은 프론트엔드 시니어 개발자이자 코드 분석 전문가입니다.
+            |아래 코드를 분석하여 두 가지를 한국어로 답변해주세요.
+            |
+            |분석 대상 파일 정보:
+            |- 파일명: ${context.fileName}
+            |- 언어: ${context.language}
+            |- 파일 경로: ${context.filePath}
+            |
+            |$importsSection
+            |$codeSection
+            |
+            |${focusNote}---
+            |
+            |다음 형식으로 표준 분석을 먼저 수행한 후, 추가 질문에도 답변하세요.
+            |
+            |## 1. 기능 요약
+            |이 코드가 어떤 역할을 하는지 2~3줄로 요약하세요.
+            |
+            |## 2. 주요 파일 / 컴포넌트
+            |관련된 주요 컴포넌트나 파일을 나열하고 각 역할을 설명하세요.
+            |
+            |## 3. 화면 동작 흐름
+            |사용자 인터랙션부터 렌더링까지의 흐름을 단계별로 설명하세요.
+            |
+            |## 4. 상태 / 데이터 흐름
+            |useState, useReducer, Context, Redux 등의 상태 관리 흐름을 설명하세요.
+            |
+            |## 5. API 연계
+            |fetch, axios, react-query, SWR 등 API 호출 지점과 엔드포인트를 정리하세요.
+            |없으면 "없음"으로 표기하세요.
+            |
+            |## 6. 예외 / 리스크
+            |에러 처리, 엣지 케이스, 잠재적 버그 가능성을 나열하세요.
+            |
+            |## 7. 확인 필요 사항
+            |코드를 완전히 이해하기 위해 추가로 확인해야 할 파일이나 로직을 나열하세요.
+            |
+            |---
+            |
+            |## 💬 추가 질문 답변
+            |$userPrompt
+        """.trimMargin()
+    }
+
     private fun buildImportsSection(imports: List<String>): String {
         return "파일의 Import 목록:\n```\n${imports.joinToString("\n")}\n```\n"
     }

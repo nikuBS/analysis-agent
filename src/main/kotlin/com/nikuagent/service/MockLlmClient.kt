@@ -13,7 +13,7 @@ package com.nikuagent.service
  */
 class MockLlmClient : LlmClient {
 
-    override fun complete(prompt: String): String {
+    override fun complete(prompt: String, onChunk: ((String) -> Unit)?): String {
         // MVP: 실제 API 호출 대신 목업 응답 반환
         // 프롬프트 내용을 간단히 파싱해서 파일명 정도만 추출
         val fileName = extractFileName(prompt)

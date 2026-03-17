@@ -28,7 +28,7 @@ class AnthropicLlmClient(
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    override fun complete(prompt: String): String {
+    override fun complete(prompt: String, onChunk: ((String) -> Unit)?): String {
         if (apiKey.isBlank()) {
             throw LlmException("API 키가 설정되지 않았습니다. Settings → Tools → Niku Agent에서 Anthropic API Key를 입력해주세요.")
         }

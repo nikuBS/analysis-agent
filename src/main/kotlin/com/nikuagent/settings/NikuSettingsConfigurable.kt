@@ -2,157 +2,125 @@ package com.nikuagent.settings
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBPasswordField
+import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
-import java.awt.BorderLayout
-import javax.swing.BorderFactory
-import javax.swing.ButtonGroup
+import com.nikuagent.service.CliLlmClient
+import java.awt.FlowLayout
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.JRadioButton
 
 /**
  * Settings → Tools → Niku Agent 설정 화면.
  *
- * 제공 항목:
- * - LLM Provider 선택 (OpenAI / Anthropic)
- * - 선택된 Provider 패널만 표시 (동적 show/hide)
- * - 각 Provider별 API Key + 모델 드롭다운 (4개)
+ * Claude CLI 방식:
+ * - claude CLI 경로 (비워두면 자동 탐색)
+ * - 사용할 모델 드롭다운 (비워두면 CLI 기본값)
+ * - 버전 확인 버튼
  */
 class NikuSettingsConfigurable : Configurable {
 
-    private var openAiRadio: JRadioButton? = null
-    private var anthropicRadio: JRadioButton? = null
-    private var openAiApiKeyField: JBPasswordField? = null
-    private var openAiModelCombo: JComboBox<String>? = null
-    private var anthropicApiKeyField: JBPasswordField? = null
-    private var anthropicModelCombo: JComboBox<String>? = null
-
-    private var openAiPanel: JPanel? = null
-    private var anthropicPanel: JPanel? = null
+    private var binaryPathField: JBTextField? = null
+    private var modelCombo: JComboBox<String>? = null
+    private var statusLabel: JBLabel? = null
     private var panel: JPanel? = null
 
     override fun getDisplayName(): String = "Niku Agent"
 
     override fun createComponent(): JComponent {
-        openAiRadio = JRadioButton("OpenAI")
-        anthropicRadio = JRadioButton("Anthropic (Claude)")
-        ButtonGroup().apply {
-            add(openAiRadio)
-            add(anthropicRadio)
+        binaryPathField = JBTextField().apply {
+            columns = 40
+            emptyText.text = "비워두면 자동 탐색 (/usr/local/bin/claude 등)"
         }
 
-        openAiApiKeyField = JBPasswordField().apply { columns = 40 }
-        openAiModelCombo = JComboBox(OPENAI_MODELS)
+        modelCombo = JComboBox(CLI_MODELS)
 
-        anthropicApiKeyField = JBPasswordField().apply { columns = 40 }
-        anthropicModelCombo = JComboBox(ANTHROPIC_MODELS)
+        statusLabel = JBLabel(" ")
 
-        openAiPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(JBLabel("API Key:"), openAiApiKeyField!!, true)
-            .addLabeledComponent(JBLabel("Model:"), openAiModelCombo!!, true)
-            .panel
-            .also { it.border = BorderFactory.createTitledBorder("OpenAI 설정") }
-
-        anthropicPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(JBLabel("API Key:"), anthropicApiKeyField!!, true)
-            .addLabeledComponent(JBLabel("Model:"), anthropicModelCombo!!, true)
-            .panel
-            .also { it.border = BorderFactory.createTitledBorder("Anthropic (Claude) 설정") }
-
-        val radioPanel = FormBuilder.createFormBuilder()
-            .addComponent(JBLabel("LLM Provider"))
-            .addComponent(openAiRadio!!)
-            .addComponent(anthropicRadio!!)
-            .panel
-
-        panel = JPanel(BorderLayout()).apply {
-            val top = JPanel(BorderLayout())
-            top.add(radioPanel, BorderLayout.NORTH)
-            top.add(openAiPanel!!, BorderLayout.CENTER)
-            top.add(anthropicPanel!!, BorderLayout.SOUTH)
-            add(top, BorderLayout.NORTH)
+        val detectButton = JButton("자동 감지").apply {
+            addActionListener {
+                val found = CliLlmClient.findBinary()
+                if (found != null) {
+                    binaryPathField!!.text = found
+                    statusLabel!!.text = "✅ 감지됨: $found"
+                } else {
+                    statusLabel!!.text = "❌ claude CLI를 찾을 수 없습니다. 설치 후 다시 시도해주세요."
+                }
+            }
         }
 
-        openAiRadio!!.addActionListener { updatePanelVisibility() }
-        anthropicRadio!!.addActionListener { updatePanelVisibility() }
+        val checkButton = JButton("버전 확인").apply {
+            addActionListener {
+                val path = binaryPathField!!.text.trim()
+                    .ifBlank { CliLlmClient.findBinary() ?: "" }
+                if (path.isBlank()) {
+                    statusLabel!!.text = "❌ CLI 경로를 먼저 입력하거나 자동 감지를 실행해주세요."
+                    return@addActionListener
+                }
+                val version = CliLlmClient.checkVersion(path)
+                statusLabel!!.text = if (version != null) "✅ $version" else "❌ 실행 실패 — 경로를 확인해주세요."
+            }
+        }
+
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            add(detectButton)
+            add(checkButton)
+        }
+
+        panel = FormBuilder.createFormBuilder()
+            .addComponent(JBLabel("<html><b>Claude CLI 설정</b><br/>" +
+                "<span style='color:gray;font-size:11px;'>" +
+                "claude CLI가 로그인된 상태여야 동작합니다. " +
+                "(<a href='https://claude.ai/download'>설치 방법</a>)</span></html>"))
+            .addSeparator()
+            .addLabeledComponent(JBLabel("CLI 경로:"), binaryPathField!!, true)
+            .addComponent(buttonPanel)
+            .addComponent(statusLabel!!)
+            .addSeparator()
+            .addLabeledComponent(JBLabel("모델:"), modelCombo!!, true)
+            .addComponent(JBLabel("<html><span style='color:gray;font-size:11px;'>" +
+                "비워두면 claude CLI 기본 모델을 사용합니다.</span></html>"))
+            .addComponentFillVertically(JPanel(), 0)
+            .panel
 
         reset()
         return panel!!
     }
 
-    private fun updatePanelVisibility() {
-        val isAnthropic = anthropicRadio?.isSelected == true
-        openAiPanel?.isVisible = !isAnthropic
-        anthropicPanel?.isVisible = isAnthropic
-        panel?.revalidate()
-        panel?.repaint()
-    }
-
     override fun isModified(): Boolean {
         val s = NikuSettings.getInstance().state
-        return selectedProvider() != (s.provider ?: "openai") ||
-               String(openAiApiKeyField!!.password) != (s.openAiApiKey ?: "") ||
-               openAiModelCombo!!.selectedItem as String != (s.openAiModel ?: OPENAI_MODELS[0]) ||
-               String(anthropicApiKeyField!!.password) != (s.anthropicApiKey ?: "") ||
-               anthropicModelCombo!!.selectedItem as String != (s.anthropicModel ?: ANTHROPIC_MODELS[0])
+        return binaryPathField!!.text.trim() != (s.cliBinaryPath ?: "") ||
+               modelCombo!!.selectedItem as String != (s.cliModel ?: CLI_MODELS[0])
     }
 
     override fun apply() {
         val s = NikuSettings.getInstance().state
-        s.provider = selectedProvider()
-        s.openAiApiKey = String(openAiApiKeyField!!.password).ifBlank { null }
-        s.openAiModel = openAiModelCombo!!.selectedItem as String
-        s.anthropicApiKey = String(anthropicApiKeyField!!.password).ifBlank { null }
-        s.anthropicModel = anthropicModelCombo!!.selectedItem as String
+        s.cliBinaryPath = binaryPathField!!.text.trim().ifBlank { null }
+        s.cliModel = (modelCombo!!.selectedItem as String).takeIf { it != CLI_MODELS[0] }
     }
 
     override fun reset() {
         val s = NikuSettings.getInstance().state
-        if ((s.provider ?: "openai") == "anthropic") {
-            anthropicRadio!!.isSelected = true
-        } else {
-            openAiRadio!!.isSelected = true
-        }
+        binaryPathField!!.text = s.cliBinaryPath ?: ""
 
-        openAiApiKeyField!!.text = s.openAiApiKey ?: ""
-        val savedOpenAiModel = s.openAiModel ?: OPENAI_MODELS[0]
-        openAiModelCombo!!.selectedItem =
-            if (OPENAI_MODELS.contains(savedOpenAiModel)) savedOpenAiModel else OPENAI_MODELS[0]
+        val savedModel = s.cliModel ?: CLI_MODELS[0]
+        modelCombo!!.selectedItem =
+            if (CLI_MODELS.contains(savedModel)) savedModel else CLI_MODELS[0]
 
-        anthropicApiKeyField!!.text = s.anthropicApiKey ?: ""
-        val savedAnthropicModel = s.anthropicModel ?: ANTHROPIC_MODELS[0]
-        anthropicModelCombo!!.selectedItem =
-            if (ANTHROPIC_MODELS.contains(savedAnthropicModel)) savedAnthropicModel else ANTHROPIC_MODELS[0]
-
-        updatePanelVisibility()
+        statusLabel!!.text = " "
     }
 
     override fun disposeUIResources() {
         panel = null
-        openAiRadio = null
-        anthropicRadio = null
-        openAiApiKeyField = null
-        openAiModelCombo = null
-        anthropicApiKeyField = null
-        anthropicModelCombo = null
-        openAiPanel = null
-        anthropicPanel = null
+        binaryPathField = null
+        modelCombo = null
+        statusLabel = null
     }
 
-    private fun selectedProvider(): String =
-        if (anthropicRadio?.isSelected == true) "anthropic" else "openai"
-
     companion object {
-        private val OPENAI_MODELS = arrayOf(
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-        )
-
-        private val ANTHROPIC_MODELS = arrayOf(
+        private val CLI_MODELS = arrayOf(
+            "기본값 (CLI 설정 따름)",
             "claude-sonnet-4-6",
             "claude-opus-4-5-20251101",
             "claude-haiku-4-5-20251001",

@@ -8,12 +8,12 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 
 /**
- * API 키 등 플러그인 설정을 영속적으로 저장한다.
+ * 플러그인 설정을 영속적으로 저장한다.
  *
  * 저장 위치: ~/Library/Application Support/JetBrains/<IDE>/options/NikuAgent.xml
- * (IDE 재시작 후에도 유지됨)
  *
- * 사용법: NikuSettings.getInstance().state.openAiApiKey
+ * Claude CLI 방식: API 키 없이 `claude --print` 명령을 사용한다.
+ * claude CLI가 로그인된 상태여야 동작한다.
  */
 @State(
     name = "NikuAgentSettings",
@@ -23,22 +23,19 @@ import com.intellij.openapi.components.service
 class NikuSettings : SimplePersistentStateComponent<NikuSettings.State>(State()) {
 
     class State : BaseState() {
-        // LLM 제공사 선택: "openai" 또는 "anthropic"
-        var provider: String? by string("openai")
+        // Claude CLI 실행 파일 경로 (비어있으면 자동 탐색)
+        var cliBinaryPath: String? by string()
 
-        // OpenAI 설정
+        // 사용할 모델 (비어있으면 CLI 기본값 사용)
+        var cliModel: String? by string()
+
+        // --- 하위 호환: API Key 방식 설정 (레거시, 미사용) ---
+        // API Key 방식으로 되돌릴 때를 위해 필드는 유지한다.
+        var provider: String? by string()
         var openAiApiKey: String? by string()
-        var openAiModel: String? by string("gpt-4o")
-
-        // Anthropic (Claude) 설정
+        var openAiModel: String? by string()
         var anthropicApiKey: String? by string()
-        var anthropicModel: String? by string("claude-sonnet-4-6")
-
-        var maxTokens: Int by property(2048)
-
-        // 하위 호환: 기존 model 필드 → openAiModel로 이전
-        @Deprecated("openAiModel 사용")
-        var model: String? by string()
+        var anthropicModel: String? by string()
     }
 
     companion object {
