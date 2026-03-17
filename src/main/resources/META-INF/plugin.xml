@@ -32,6 +32,19 @@
         <applicationService
             serviceImplementation="com.nikuagent.service.NikuAgentService"
         />
+
+        <!-- API 키 등 설정 저장소 -->
+        <applicationService
+            serviceImplementation="com.nikuagent.settings.NikuSettings"
+        />
+
+        <!-- Settings → Tools → Niku Agent 설정 화면 -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.nikuagent.settings.NikuSettingsConfigurable"
+            id="com.nikuagent.settings.NikuSettingsConfigurable"
+            displayName="Niku Agent"
+        />
     </extensions>
 
     <actions>

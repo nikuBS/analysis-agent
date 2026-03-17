@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.logger
 import com.nikuagent.context.FileContext
 import com.nikuagent.formatter.ResultFormatter
 import com.nikuagent.prompt.PromptBuilder
+import com.nikuagent.settings.NikuSettings
 
 /**
  * 플러그인의 핵심 서비스.
@@ -12,20 +13,26 @@ import com.nikuagent.prompt.PromptBuilder
  * 분석 파이프라인을 조율한다:
  * [FileContext] → [PromptBuilder] → [LlmClient] → [ResultFormatter] → HTML 결과
  *
- * IntelliJ Application Service로 등록되어 싱글턴으로 관리된다.
- *
- * TODO: 실제 API 연동 시 [llmClient]를 [OpenAiLlmClient]로 교체
+ * API 키가 설정되어 있으면 [OpenAiLlmClient], 없으면 [MockLlmClient]를 사용한다.
  */
 @Service(Service.Level.APP)
 class NikuAgentService {
 
     private val log = logger<NikuAgentService>()
 
-    // TODO: 실제 API 연동 시 이 부분을 교체한다.
-    //   옵션 A: 직접 교체 → MockLlmClient() → OpenAiLlmClient(apiKey)
-    //   옵션 B: PluginSettings에서 apiKey를 읽어 주입
-    //   옵션 C: 의존성 주입 프레임워크 도입
-    private val llmClient: LlmClient = MockLlmClient()
+    /**
+     * 매 호출 시 Settings에서 최신 API 키를 읽어 클라이언트를 결정한다.
+     * Settings 화면에서 키를 저장하면 즉시 반영된다.
+     */
+    private fun resolveLlmClient(): LlmClient {
+        val settings = NikuSettings.getInstance().state
+        return if (!settings.openAiApiKey.isNullOrBlank()) {
+            OpenAiLlmClient(apiKey = settings.openAiApiKey!!, model = settings.model ?: "gpt-4o")
+        } else {
+            log.warn("Niku Agent: API 키 미설정 — Mock 응답을 사용합니다.")
+            MockLlmClient()
+        }
+    }
 
     /**
      * 파일 컨텍스트를 분석하고 HTML 형식의 결과를 반환한다.
@@ -43,7 +50,7 @@ class NikuAgentService {
             val prompt = PromptBuilder.build(context)
             log.debug("Niku Agent: prompt built, length=${prompt.length}")
 
-            val rawResponse = llmClient.complete(prompt)
+            val rawResponse = resolveLlmClient().complete(prompt)
             log.debug("Niku Agent: LLM response received, length=${rawResponse.length}")
 
             ResultFormatter.format(rawResponse, context)

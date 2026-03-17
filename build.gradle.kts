@@ -32,10 +32,9 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
     }
 
-    // OkHttp: 실제 LLM API 호출 시 사용 (Mock 단계에선 미사용)
-    // TODO: 실제 API 연동 시 주석 해제
-    // implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // implementation("com.google.code.gson:gson:2.10.1")
+    // OpenAI API 호출용
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
     testImplementation("junit:junit:4.13.2")
 }
