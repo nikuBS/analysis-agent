@@ -30,11 +30,20 @@ object ContextCollector {
         val fullContent = document.text
 
         val selectionModel = editor.selectionModel
-        val selection = if (selectionModel.hasSelection()) {
+        val rawSelection = if (selectionModel.hasSelection()) {
             selectionModel.selectedText?.takeIf { it.isNotBlank() }
         } else {
             null
         }
+
+        // 공백·줄바꿈 없는 단일 식별자(함수명 등)만 선택된 경우를 감지
+        val isSingleIdentifier = rawSelection != null &&
+                !rawSelection.contains('\n') &&
+                !rawSelection.contains(' ') &&
+                rawSelection.matches(Regex("""[A-Za-z_$][A-Za-z0-9_$]*"""))
+
+        val selection = if (isSingleIdentifier) null else rawSelection
+        val focusFunctionName = if (isSingleIdentifier) rawSelection else null
 
         val language = detectLanguage(file.extension)
         val imports = extractImports(fullContent)
@@ -45,6 +54,7 @@ object ContextCollector {
             language = language,
             fullContent = fullContent,
             selection = selection,
+            focusFunctionName = focusFunctionName,
             imports = imports,
         )
     }

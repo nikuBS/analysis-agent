@@ -7,9 +7,10 @@ package com.nikuagent.context
  * @param fileName    파일명 (예: UserList.tsx)
  * @param language    언어 식별자 (예: TypeScript, JavaScript)
  * @param fullContent 파일 전체 텍스트
- * @param selection   에디터에서 선택된 텍스트. 선택 없으면 null
- * @param imports     파일 상단 import 구문 목록 (간단 파싱)
- *                    TODO: 정교한 PSI 기반 import 추적으로 교체 가능
+ * @param selection           에디터에서 선택된 텍스트 (코드 블록). 선택 없으면 null
+ * @param focusFunctionName   단일 식별자(함수명)만 선택한 경우의 이름. 전체 파일을 보내되 이 함수에 집중 분석
+ * @param imports             파일 상단 import 구문 목록 (간단 파싱)
+ *                            TODO: 정교한 PSI 기반 import 추적으로 교체 가능
  */
 data class FileContext(
     val filePath: String,
@@ -17,5 +18,6 @@ data class FileContext(
     val language: String,
     val fullContent: String,
     val selection: String? = null,
+    val focusFunctionName: String? = null,
     val imports: List<String> = emptyList(),
 )

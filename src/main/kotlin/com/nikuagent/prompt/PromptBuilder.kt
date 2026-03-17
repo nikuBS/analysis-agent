@@ -27,11 +27,17 @@ object PromptBuilder {
             ""
         }
 
+        val focusInstruction = if (context.focusFunctionName != null) {
+            "⚠️ 분석 집중 대상: `${context.focusFunctionName}` 함수(또는 변수/컴포넌트)에 집중하여 분석해주세요. 전체 파일 코드에서 해당 심볼의 정의와 호출 흐름을 추적하세요.\n|"
+        } else {
+            ""
+        }
+
         return """
             |당신은 프론트엔드 시니어 개발자이자 코드 분석 전문가입니다.
             |아래 코드를 분석하여 업무 프로세스와 코드 동작 흐름을 구조화해서 설명해주세요.
             |
-            |분석 대상 파일 정보:
+            |${focusInstruction}분석 대상 파일 정보:
             |- 파일명: ${context.fileName}
             |- 언어: ${context.language}
             |- 파일 경로: ${context.filePath}
