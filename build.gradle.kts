@@ -56,3 +56,15 @@ intellijPlatform {
         // TODO: JetBrains Marketplace 토큰 설정
     }
 }
+
+tasks.runIde {
+    // 샌드박스 IDE JVM 힙 설정
+    jvmArgs("-Xmx2048m", "-Xms512m")
+    // macOS에서 IDE 창이 포커스 되도록
+    systemProperty("idea.no.launcher", "true")
+}
+
+// MVP 단계에서 불필요한 태스크 스킵 (빌드 속도 향상)
+tasks.buildSearchableOptions {
+    enabled = false
+}
