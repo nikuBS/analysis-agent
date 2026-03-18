@@ -1,0 +1,79 @@
+{
+  "name": "niku-agent",
+  "displayName": "Niku Agent",
+  "description": "프론트엔드 코드 흐름 분석기 (Claude CLI 기반)",
+  "version": "0.1.0",
+  "publisher": "niku",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "niku-agent.analyze",
+        "title": "Analyze with Niku Agent"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "niku-agent.analyze",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "editorFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "niku-agent.analyze",
+          "when": "editorFocus",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Niku Agent",
+      "properties": {
+        "nikuAgent.cliBinaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "claude CLI 실행 파일 경로 (비워두면 자동 탐색)"
+        },
+        "nikuAgent.model": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "claude-sonnet-4-6",
+            "claude-opus-4-5-20251101",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-sonnet-20241022"
+          ],
+          "enumDescriptions": [
+            "CLI 기본값 사용",
+            "Claude Sonnet 4.6",
+            "Claude Opus 4.5",
+            "Claude Haiku 4.5",
+            "Claude 3.5 Sonnet"
+          ],
+          "description": "사용할 Claude 모델 (비워두면 CLI 기본값)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && npx vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
+  <title>Niku Agent</title>
+  <style>
+    /* ── 다크 팔레트 (WebStorm 플러그인과 동일) ── */
+    :root {
+      --bg:            #1e1e1e;
+      --bg-panel:      #252526;
+      --bg-tab-active: #1e1e1e;
+      --bg-tab-idle:   #2d2d2d;
+      --bg-tabbar:     #252526;
+      --bg-input:      #3c3c3c;
+      --fg:            #cccccc;
+      --fg-dim:        #888888;
+      --fg-close:      #666666;
+      --accent:        #569cd6;
+      --btn-bg:        #0e639c;
+      --btn-fg:        #ffffff;
+      --border:        #3c3c3c;
+      --ok:            #6a9955;
+      --warn:          #ce9178;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--fg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── 탭 바 ── */
+    #tab-bar {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      background: var(--bg-tabbar);
+      border-bottom: 1px solid var(--border);
+      min-height: 34px;
+      flex-shrink: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    #tab-bar::-webkit-scrollbar { height: 3px; }
+    #tab-bar::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--fg-dim);
+      background: var(--bg-tab-idle);
+      border-right: 1px solid var(--border);
+      border-top: 2px solid transparent;
+      user-select: none;
+      min-width: 80px;
+    }
+    .tab.active {
+      color: var(--fg);
+      background: var(--bg-tab-active);
+      border-top-color: var(--accent);
+    }
+    .tab-close {
+      color: var(--fg-close);
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1;
+      padding: 0 2px;
+      cursor: pointer;
+    }
+    .tab-close:hover { color: var(--fg); }
+
+    /* ── 컨텐츠 영역 ── */
+    #content {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── 공통 패널 ── */
+    .panel {
+      height: 100%;
+      overflow-y: auto;
+      padding: 0;
+    }
+    .panel::-webkit-scrollbar { width: 6px; }
+    .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── 웰컴 패널 ── */
+    .welcome {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      padding: 40px 24px;
+      gap: 8px;
+    }
+    .welcome .icon  { font-size: 36px; }
+    .welcome h2     { color: var(--accent); font-size: 18px; margin-top: 4px; }
+    .welcome .sub   { color: var(--fg-dim); font-size: 12px; }
+    .welcome .hint  { color: #aaaaaa; font-size: 13px; line-height: 1.8; margin-top: 12px; }
+    .welcome b      { color: #dcdcaa; }
+    .welcome .stack { color: #444444; font-size: 11px; margin-top: 16px; }
+
+    /* ── 옵션 패널 ── */
+    .options-panel {
+      padding: 14px 16px;
+      background: var(--bg-panel);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .file-info    { font-size: 12px; line-height: 1.6; }
+    .file-name    { color: #9cdcfe; font-weight: bold; }
+    .file-lang    { color: var(--fg-dim); font-size: 11px; margin-left: 6px; }
+    .file-target  { margin-left: 6px; font-size: 12px; }
+    .target-fn    { color: #4ec9b0; }
+    .target-sel   { color: #ce9178; }
+    .target-file  { color: var(--fg-dim); }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    .radio-row {
+      display: flex;
+      gap: 16px;
+    }
+    .radio-row label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--fg);
+    }
+    .radio-row input[type=radio] { accent-color: var(--accent); cursor: pointer; }
+
+    textarea {
+      width: 100%;
+      min-height: 72px;
+      background: var(--bg-input);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: Arial, sans-serif;
+      resize: vertical;
+      outline: none;
+      display: none;
+    }
+    textarea:focus { border-color: var(--accent); }
+
+    .btn-analyze {
+      display: inline-block;
+      padding: 6px 16px;
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      border: none;
+      border-radius: 2px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    .btn-analyze:hover { background: #1177bb; }
+
+    /* ── 로딩 패널 ── */
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 8px;
+      text-align: center;
+    }
+    .loading .spinner { font-size: 30px; animation: spin 2s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .loading h3 { color: var(--accent); font-size: 14px; }
+    .loading p  { color: var(--fg-dim); font-size: 12px; }
+
+    /* ── 스트리밍 패널 ── */
+    .streaming-panel {
+      padding: 14px 16px;
+      height: 100%;
+      overflow-y: auto;
+    }
+    .streaming-panel pre {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #d4d4d4;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .cursor { color: var(--accent); font-weight: bold; animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── 결과 패널 ── */
+    .result-panel {
+      padding: 0;
+      height: 100%;
+      overflow-y: auto;
+    }
+    .result-meta {
+      background: #2d2d2d;
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: #888888;
+    }
+    .result-meta b { color: #9cdcfe; }
+    .result-body { padding: 14px 16px; }
+
+    /* 결과 내 마크다운 스타일 */
+    .result-body h2 {
+      font-size: 14px; font-weight: bold; color: #569cd6;
+      margin: 18px 0 5px;
+    }
+    .result-body h3 {
+      font-size: 13px; font-weight: bold; color: #c586c0;
+      margin: 12px 0 4px;
+    }
+    .result-body p  { margin: 4px 0 8px; line-height: 1.65; }
+    .result-body code {
+      font-family: monospace; font-size: 11px;
+      background: #2d2d2d; color: #ce9178;
+      padding: 1px 5px; border-radius: 2px;
+    }
+    .result-body pre {
+      font-family: monospace; font-size: 11px;
+      background: #252526; color: #d4d4d4;
+      padding: 10px 12px; margin: 8px 0;
+      white-space: pre-wrap; word-wrap: break-word;
+      border-left: 3px solid #569cd6;
+      border-radius: 0 2px 2px 0;
+    }
+    .result-body pre code { background: none; color: inherit; padding: 0; }
+    .result-body ul, .result-body ol {
+      margin: 4px 0 8px 18px; padding: 0;
+    }
+    .result-body li { margin-bottom: 3px; line-height: 1.6; }
+    .result-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+    .result-body b  { color: #dcdcaa; }
+    .result-body i  { color: #d4d4d4; }
+    .result-body .tag {
+      font-family: monospace; font-size: 11px;
+      background: #2d2d2d; color: #4ec9b0; padding: 1px 5px; border-radius: 2px;
+    }
+    .result-body .ok   { color: #6a9955; }
+    .result-body .warn { color: #ce9178; }
+
+    /* ── 로그인 / 에러 패널 ── */
+    .info-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 10px;
+      text-align: center;
+      padding: 40px 24px;
+    }
+    .info-panel .icon { font-size: 32px; }
+    .info-panel h3    { font-size: 15px; font-weight: bold; color: var(--fg); }
+    .info-panel p     { color: var(--fg-dim); font-size: 12px; line-height: 1.7; }
+    .info-panel .btn-retry {
+      margin-top: 8px;
+      padding: 6px 16px;
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      border: none;
+      border-radius: 2px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .info-panel .btn-retry:hover { background: #1177bb; }
+  </style>
+</head>
+<body>
+  <div id="tab-bar"></div>
+  <div id="content"></div>
+
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+
+    // ── 상태 ──────────────────────────────────────────────────────
+    let tabs = [];      // {id, title, state, context, streamText}
+    let activeId = null;
+
+    // ── 초기 웰컴 탭 ─────────────────────────────────────────────
+    addTab({ id: -1, title: '🏠 홈', state: 'welcome', closeable: false });
+    selectTab(-1);
+
+    // ── 탭 관리 ──────────────────────────────────────────────────
+    function addTab({ id, title, state, closeable = true, context = null }) {
+      tabs.push({ id, title, state, context, streamText: '', closeable });
+      render();
+    }
+
+    function selectTab(id) {
+      activeId = id;
+      render();
+    }
+
+    function closeTab(id) {
+      const idx = tabs.findIndex(t => t.id === id);
+      if (idx < 0 || !tabs[idx].closeable) return;
+      tabs.splice(idx, 1);
+      if (activeId === id) {
+        activeId = tabs[Math.max(0, idx - 1)]?.id ?? null;
+      }
+      render();
+    }
+
+    function getActive() {
+      return tabs.find(t => t.id === activeId);
+    }
+
+    function updateTab(id, patch) {
+      const t = tabs.find(t => t.id === id);
+      if (t) Object.assign(t, patch);
+    }
+
+    // ── 렌더링 ────────────────────────────────────────────────────
+    function render() {
+      renderTabBar();
+      renderContent();
+    }
+
+    function renderTabBar() {
+      const bar = document.getElementById('tab-bar');
+      bar.innerHTML = '';
+      for (const tab of tabs) {
+        const div = document.createElement('div');
+        div.className = 'tab' + (tab.id === activeId ? ' active' : '');
+        div.innerHTML = escHtml(tab.title);
+        div.addEventListener('click', () => selectTab(tab.id));
+
+        if (tab.closeable) {
+          const x = document.createElement('span');
+          x.className = 'tab-close';
+          x.textContent = '×';
+          x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.id); });
+          div.appendChild(x);
+        }
+        bar.appendChild(div);
+      }
+    }
+
+    function renderContent() {
+      const box = document.getElementById('content');
+      const tab = getActive();
+      if (!tab) { box.innerHTML = ''; return; }
+
+      switch (tab.state) {
+        case 'welcome':    box.innerHTML = welcomeHtml(); break;
+        case 'options':    box.innerHTML = optionsHtml(tab); break;
+        case 'loading':    box.innerHTML = loadingHtml(); break;
+        case 'streaming':  renderStreaming(box, tab); break;
+        case 'result':     box.innerHTML = tab.resultHtml || ''; break;
+        case 'login':      box.innerHTML = loginHtml(tab.id); break;
+        case 'error':      box.innerHTML = errorHtml(tab.errorMsg); break;
+        default:           box.innerHTML = '';
+      }
+
+      // 동적 이벤트 바인딩
+      bindEvents(tab);
+    }
+
+    function bindEvents(tab) {
+      if (tab.state === 'options') {
+        const std = document.getElementById('radio-std');
+        const cst = document.getElementById('radio-cst');
+        const ta  = document.getElementById('prompt-area');
+        const btn = document.getElementById('btn-analyze');
+
+        std?.addEventListener('change', () => { ta.style.display = 'none'; });
+        cst?.addEventListener('change', () => { ta.style.display = 'block'; ta.focus(); });
+        btn?.addEventListener('click', () => {
+          const custom = cst?.checked ? ta?.value?.trim() || null : null;
+          updateTab(tab.id, { state: 'loading' });
+          renderContent();
+          vscode.postMessage({ type: 'analyze', tabId: tab.id, customPrompt: custom });
+        });
+      }
+      if (tab.state === 'login') {
+        document.getElementById('btn-retry-' + tab.id)
+          ?.addEventListener('click', () => {
+            updateTab(tab.id, { state: 'loading' });
+            renderContent();
+            vscode.postMessage({ type: 'retry', tabId: tab.id });
+          });
+      }
+      if (tab.state === 'streaming') {
+        const el = document.getElementById('stream-box');
+        if (el) el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    // ── HTML 템플릿 ───────────────────────────────────────────────
+    function welcomeHtml() {
+      return `<div class="panel welcome">
+        <div class="icon">🔍</div>
+        <h2>Niku Agent</h2>
+        <p class="sub">프론트엔드 코드 흐름 분석기</p>
+        <p class="hint">
+          분석할 파일을 열고<br/>
+          <b>우클릭 → Analyze with Niku Agent</b><br/>
+          또는 <b>Ctrl+Alt+N</b>
+        </p>
+        <p class="stack">React · TypeScript · JavaScript</p>
+      </div>`;
+    }
+
+    function optionsHtml(tab) {
+      const ctx = tab.context;
+      const targetHtml = ctx.focusFunctionName
+        ? `<span class="file-target target-fn">🎯 ${escHtml(ctx.focusFunctionName)}</span>`
+        : ctx.selection
+        ? `<span class="file-target target-sel">✂️ ${ctx.selection.split('\n').length}줄 선택</span>`
+        : `<span class="file-target target-file">📄 전체 파일</span>`;
+
+      return `<div class="panel options-panel">
+        <div class="file-info">
+          <span class="file-name">${escHtml(ctx.fileName)}</span>
+          <span class="file-lang">${escHtml(ctx.language)}</span>
+          ${targetHtml}
+        </div>
+        <div class="divider"></div>
+        <div class="radio-row">
+          <label><input type="radio" name="mode" id="radio-std" checked /> 표준 분석</label>
+          <label><input type="radio" name="mode" id="radio-cst" /> 커스텀 질문</label>
+        </div>
+        <textarea id="prompt-area" placeholder="예: 이 컴포넌트의 렌더링 조건을 정리해줘"></textarea>
+        <button class="btn-analyze" id="btn-analyze">▶  분석 시작</button>
+      </div>`;
+    }
+
+    function loadingHtml() {
+      return `<div class="panel loading">
+        <div class="spinner">⏳</div>
+        <h3>Claude에 요청 중...</h3>
+        <p>응답이 시작되면 실시간으로 표시됩니다.</p>
+      </div>`;
+    }
+
+    function renderStreaming(box, tab) {
+      const esc = escHtml(tab.streamText || '');
+      box.innerHTML = `<div class="streaming-panel" id="stream-box">
+        <pre>${esc}<span class="cursor">▌</span></pre>
+      </div>`;
+      box.querySelector('#stream-box').scrollTop = 999999;
+    }
+
+    function loginHtml(tabId) {
+      return `<div class="panel info-panel">
+        <div class="icon">🔐</div>
+        <h3>로그인이 필요합니다</h3>
+        <p>터미널에서 <code>claude</code>를 실행하고<br/>
+           <code>/login</code> 명령으로 로그인해주세요.</p>
+        <button class="btn-retry" id="btn-retry-${tabId}">↩  로그인 완료 — 다시 분석하기</button>
+      </div>`;
+    }
+
+    function errorHtml(msg) {
+      return `<div class="panel info-panel">
+        <div class="icon">❌</div>
+        <h3>분석 실패</h3>
+        <p>${escHtml(msg || '알 수 없는 오류')}</p>
+      </div>`;
+    }
+
+    // ── 익스텐션 메시지 수신 ──────────────────────────────────────
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      switch (msg.type) {
+
+        case 'newTab':
+          addTab({ id: msg.tabId, title: '⏳ ' + msg.title, state: 'options',
+                   context: msg.context, closeable: true });
+          selectTab(msg.tabId);
+          break;
+
+        case 'showLoading':
+          updateTab(msg.tabId, { state: 'loading' });
+          if (msg.tabId === activeId) renderContent();
+          break;
+
+        case 'streaming':
+          updateTab(msg.tabId, { state: 'streaming', streamText: msg.text });
+          if (msg.tabId === activeId) renderContent();
+          break;
+
+        case 'result': {
+          const html = buildResultHtml(msg.markdown, msg.context);
+          updateTab(msg.tabId, { state: 'result', resultHtml: html });
+          // 탭 제목에서 ⏳ 제거
+          const t = tabs.find(t => t.id === msg.tabId);
+          if (t) t.title = t.title.replace('⏳ ', '');
+          if (msg.tabId === activeId) render();
+          else renderTabBar();
+          break;
+        }
+
+        case 'loginRequired':
+          updateTab(msg.tabId, { state: 'login' });
+          if (msg.tabId === activeId) renderContent();
+          break;
+
+        case 'showError':
+          updateTab(msg.tabId, { state: 'error', errorMsg: msg.message });
+          if (msg.tabId === activeId) renderContent();
+          break;
+      }
+    });
+
+    // ── Markdown → HTML 변환 (ResultFormatter 포팅) ───────────────
+    function buildResultHtml(md, ctx) {
+      const now = new Date();
+      const time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+      const targetLabel = ctx.focusFunctionName
+        ? '🎯 ' + escHtml(ctx.focusFunctionName)
+        : ctx.selection
+        ? '✂️ ' + ctx.selection.split('\n').length + '줄 선택'
+        : '📄 전체 파일';
+
+      const body = mdToHtml(md);
+      return `<div class="result-panel">
+        <div class="result-meta">
+          <b>${escHtml(ctx.fileName)}</b>
+          &nbsp;·&nbsp; ${escHtml(ctx.language)}
+          &nbsp;·&nbsp; ${targetLabel}
+          &nbsp;·&nbsp; ${time}
+        </div>
+        <div class="result-body">${body}</div>
+      </div>`;
+    }
+
+    function mdToHtml(md) {
+      let h = escHtml(md);
+
+      // 코드 블록 (``` ... ```)
+      h = h.replace(/```[\w]*\n([\s\S]*?)```/gm, (_, c) =>
+        '<pre><code>' + c.trimEnd() + '</code></pre>');
+
+      // H2 / H3
+      h = h.replace(/^## (.+)$/gm, (_, t) => '<h2>' + t + '</h2>');
+      h = h.replace(/^### (.+)$/gm, (_, t) => '<h3>' + t + '</h3>');
+
+      // JSDoc 태그
+      h = h.replace(/`(@[a-zA-Z]+)`/g, (_, t) => '<span class="tag">' + t + '</span>');
+
+      // 인라인 코드
+      h = h.replace(/`([^`\n]+)`/g, (_, c) => '<code>' + c + '</code>');
+
+      // 굵게 / 이탤릭
+      h = h.replace(/\*\*(.+?)\*\*/g, (_, t) => '<b>' + t + '</b>');
+      h = h.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, (_, t) => '<i>' + t + '</i>');
+
+      // HR
+      h = h.replace(/^---$/gm, '<hr/>');
+
+      // ✅ / ⚠️ 강조
+      h = h.replace(/✅ (.+)/g, (_, t) => '<span class="ok">✅ ' + t + '</span>');
+      h = h.replace(/⚠️ (.+)/g, (_, t) => '<span class="warn">⚠️ ' + t + '</span>');
+
+      // 리스트
+      h = buildLists(h);
+
+      // 줄바꿈
+      h = h.replace(/\n\n+/g, '<br/>').replace(/\n/g, '<br/>');
+      return h;
+    }
+
+    function buildLists(html) {
+      const lines = html.split('\n');
+      const out = [];
+      let inUl = false, inOl = false;
+      for (const line of lines) {
+        if (/^- .+/.test(line)) {
+          if (inOl) { out.push('</ol>'); inOl = false; }
+          if (!inUl) { out.push('<ul>'); inUl = true; }
+          out.push('<li>' + line.slice(2) + '</li>');
+        } else if (/^\d+\. .+/.test(line)) {
+          if (inUl) { out.push('</ul>'); inUl = false; }
+          if (!inOl) { out.push('<ol>'); inOl = true; }
+          out.push('<li>' + line.replace(/^\d+\. /, '') + '</li>');
+        } else {
+          if (inUl) { out.push('</ul>'); inUl = false; }
+          if (inOl) { out.push('</ol>'); inOl = false; }
+          out.push(line);
+        }
+      }
+      if (inUl) out.push('</ul>');
+      if (inOl) out.push('</ol>');
+      return out.join('\n');
+    }
+
+    // ── 유틸 ──────────────────────────────────────────────────────
+    function escHtml(s) {
+      if (!s) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
