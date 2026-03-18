@@ -8,8 +8,11 @@ import com.nikuagent.service.CliLlmClient
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Cursor
+import java.awt.Desktop
 import java.awt.FlowLayout
 import java.awt.Font
+import java.net.URI
+import java.util.concurrent.TimeUnit
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -264,11 +267,11 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         }
         val descLabel = JBLabel("<html><div style='text-align:center;color:gray;'>" +
             "Claude CLI가 로그인되어 있지 않습니다.<br/>" +
-            "아래 버튼으로 터미널에서 로그인 후<br/>" +
-            "다시 분석을 실행해주세요." +
+            "아래 버튼을 클릭하면 브라우저에서 인증이 시작됩니다." +
             "</div></html>").apply {
             alignmentX = CENTER_ALIGNMENT
         }
+        val loginStatusLabel = JBLabel(" ").apply { alignmentX = CENTER_ALIGNMENT }
 
         root.add(Box.createVerticalStrut(16))
         root.add(titleLabel)
@@ -279,26 +282,38 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         root.add(Box.createVerticalStrut(20))
 
         // 로그인 버튼
-        val loginBtn = JButton("터미널에서 로그인  (claude /login)").apply {
+        val cancelBtn = JButton("취소").apply { isVisible = false; alignmentX = CENTER_ALIGNMENT }
+        val loginBtn = JButton("🔑  로그인 (브라우저 인증)").apply {
             font = Font(font.name, Font.BOLD, 13)
             alignmentX = CENTER_ALIGNMENT
-            addActionListener {
-                val binaryPath = CliLlmClient.findBinary() ?: "claude"
-                try {
-                    Runtime.getRuntime().exec(arrayOf(
-                        "osascript",
-                        "-e", "tell application \"Terminal\" to activate",
-                        "-e", "tell application \"Terminal\" to do script \"$binaryPath /login\""
-                    ))
-                } catch (_: Exception) { }
-            }
         }
-        val loginBtnPanel = JPanel(FlowLayout(FlowLayout.CENTER)).apply { add(loginBtn) }
-        root.add(loginBtnPanel)
+
+        loginBtn.addActionListener {
+            val binaryPath = CliLlmClient.findBinary() ?: run {
+                loginStatusLabel.text = "❌ claude CLI를 찾을 수 없습니다. Settings에서 경로를 설정해주세요."
+                return@addActionListener
+            }
+            startLoginFlow(binaryPath, loginStatusLabel, loginBtn, cancelBtn)
+        }
+
+        cancelBtn.addActionListener {
+            activeLoginProcess?.destroyForcibly()
+            activeLoginProcess = null
+            loginStatusLabel.text = "⚠️ 로그인이 취소되었습니다."
+            loginBtn.isEnabled = true
+            cancelBtn.isVisible = false
+        }
+
+        val btnRow = JPanel(FlowLayout(FlowLayout.CENTER, 6, 0)).apply {
+            add(loginBtn); add(cancelBtn)
+        }
+        root.add(btnRow)
+        root.add(Box.createVerticalStrut(8))
+        root.add(loginStatusLabel)
 
         // 다시 분석 버튼 (onRetry가 있을 때만 표시)
         if (onRetry != null) {
-            root.add(Box.createVerticalStrut(8))
+            root.add(Box.createVerticalStrut(12))
             val retryBtn = JButton("↩  로그인 완료 — 다시 분석하기").apply {
                 alignmentX = CENTER_ALIGNMENT
                 addActionListener { onRetry() }
@@ -309,16 +324,91 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
         root.add(Box.createVerticalStrut(16))
 
-        // 설치 안내 링크 텍스트
         val hintLabel = JBLabel("<html><div style='text-align:center;color:gray;font-size:11px;'>" +
-            "Claude CLI가 없다면 <b>Settings → Tools → Niku Agent</b>에서<br/>" +
-            "자동 감지 또는 경로를 설정해주세요." +
-            "</div></html>").apply {
-            alignmentX = CENTER_ALIGNMENT
-        }
+            "CLI 경로 설정: <b>Settings → Tools → Niku Agent</b>" +
+            "</div></html>").apply { alignmentX = CENTER_ALIGNMENT }
         root.add(hintLabel)
 
         return root
+    }
+
+    /** Tool Window 로그인 패널에서 사용하는 login 프로세스 핸들 */
+    @Volatile private var activeLoginProcess: Process? = null
+
+    private fun startLoginFlow(
+        binaryPath: String,
+        statusLabel: JBLabel,
+        loginBtn: JButton,
+        cancelBtn: JButton,
+    ) {
+        activeLoginProcess?.destroyForcibly()
+
+        SwingUtilities.invokeLater {
+            statusLabel.text = "⏳ 브라우저에서 인증을 진행해주세요..."
+            loginBtn.isEnabled = false
+            cancelBtn.isVisible = true
+        }
+
+        Thread {
+            try {
+                val proc = ProcessBuilder(binaryPath, "/login")
+                    .redirectErrorStream(true)
+                    .start()
+                activeLoginProcess = proc
+
+                val sb = StringBuilder()
+                val urlRegex = Regex("""https?://\S+""")
+                var browserOpened = false
+
+                proc.inputStream.bufferedReader().use { reader ->
+                    val buf = CharArray(256)
+                    while (true) {
+                        val n = reader.read(buf)
+                        if (n < 0) break
+                        sb.append(buf, 0, n)
+                        if (!browserOpened) {
+                            val url = urlRegex.find(sb.toString())?.value
+                            if (url != null) {
+                                browserOpened = true
+                                try {
+                                    Desktop.getDesktop().browse(URI(url))
+                                    SwingUtilities.invokeLater {
+                                        statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
+                                    }
+                                } catch (_: Exception) {
+                                    SwingUtilities.invokeLater {
+                                        statusLabel.text = "🌐 브라우저 열기 실패 — URL: $url"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val exitCode = runCatching {
+                    proc.waitFor(3, TimeUnit.MINUTES); proc.exitValue()
+                }.getOrDefault(-1)
+                activeLoginProcess = null
+
+                val finalStatus = when {
+                    exitCode == 0 -> "✅ 로그인 완료! '다시 분석하기'를 클릭해주세요."
+                    exitCode == -1 -> "⚠️ 로그인이 취소되었습니다."
+                    else -> "❌ 로그인 실패 (코드: $exitCode). 다시 시도해주세요."
+                }
+                SwingUtilities.invokeLater {
+                    statusLabel.text = finalStatus
+                    loginBtn.isEnabled = true
+                    cancelBtn.isVisible = false
+                }
+            } catch (e: Exception) {
+                activeLoginProcess = null
+                SwingUtilities.invokeLater {
+                    statusLabel.text = "❌ 오류: ${e.message}"
+                    loginBtn.isEnabled = true
+                    cancelBtn.isVisible = false
+                }
+            }
+        }.apply { isDaemon = true; name = "niku-login-tw" }.start()
     }
 
     private fun buildContextDescription(context: FileContext): String {
