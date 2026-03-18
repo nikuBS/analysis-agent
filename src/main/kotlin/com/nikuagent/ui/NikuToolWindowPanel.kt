@@ -20,6 +20,7 @@ import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.JTabbedPane
 import javax.swing.SwingUtilities
+import javax.swing.UIManager
 
 /**
  * Niku Agent Tool Window 메인 패널.
@@ -80,20 +81,30 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     private fun addAnalysisTab(context: FileContext): Int {
         val panel = AnalysisTabPanel()
-        val title = context.fileName
+        // 탭 제목: 파일명 + 선택 정보
+        val shortTitle = buildTabTitle(context)
         val idx = tabbedPane.tabCount
-        tabbedPane.addTab(title, panel)
-        tabbedPane.setTabComponentAt(idx, makeCloseableHeader("⏳ $title", idx))
+        tabbedPane.addTab(shortTitle, panel)
+        tabbedPane.setTabComponentAt(idx, makeCloseableHeader("⏳ $shortTitle", idx))
         tabbedPane.selectedIndex = idx
         return idx
+    }
+
+    /** 탭에 표시할 짧은 제목 (파일명 + 선택/함수 정보) */
+    private fun buildTabTitle(context: FileContext): String = when {
+        context.focusFunctionName != null ->
+            "${context.fileName} › ${context.focusFunctionName}"
+        context.selection != null ->
+            "${context.fileName} › ${context.selection.lines().size}줄"
+        else ->
+            context.fileName
     }
 
     private fun refreshTabTitle(idx: Int) {
         if (idx <= 0 || idx >= tabbedPane.tabCount) return
         val comp = tabbedPane.getTabComponentAt(idx) as? JPanel ?: return
         val label = comp.components.filterIsInstance<JLabel>().firstOrNull() ?: return
-        // ⏳ → 📄 로 교체
-        label.text = label.text.replace("⏳ ", "📄 ")
+        label.text = label.text.replace("⏳ ", "")  // 로딩 표시 제거
     }
 
     private fun getTabPanel(index: Int): AnalysisTabPanel =
@@ -106,21 +117,33 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         }
     }
 
-    /** 탭 헤더: 제목 Label + × 버튼 */
-    private fun makeCloseableHeader(title: String, tabIndex: Int): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+    /**
+     * 탭 헤더 컴포넌트: 제목 + × 닫기 버튼.
+     *
+     * IDE 테마(다크/라이트) 색상을 자동 상속하도록
+     * UIManager에서 탭 전경색을 읽어 JLabel에 직접 적용한다.
+     */
+    private fun makeCloseableHeader(title: String, @Suppress("UNUSED_PARAMETER") tabIndex: Int): JPanel {
+        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
         panel.isOpaque = false
 
+        // IDE 테마의 탭 텍스트 색상 — 다크 모드에서도 올바르게 표시됨
+        val fgColor: Color = UIManager.getColor("TabbedPane.foreground")
+            ?: UIManager.getColor("Label.foreground")
+            ?: Color(0xBBBBBB)
+
         val label = JLabel(title).apply {
-            font = font.deriveFont(12f)
+            font      = UIManager.getFont("TabbedPane.font") ?: font.deriveFont(12f)
+            foreground = fgColor
         }
         val closeBtn = JButton("×").apply {
-            preferredSize = Dimension(16, 16)
-            isBorderPainted = false
+            preferredSize      = Dimension(16, 16)
+            isBorderPainted    = false
             isContentAreaFilled = false
-            isFocusPainted = false
-            font = font.deriveFont(Font.BOLD, 12f)
-            toolTipText = "탭 닫기"
+            isFocusPainted     = false
+            foreground         = fgColor
+            font               = font.deriveFont(Font.BOLD, 13f)
+            toolTipText        = "탭 닫기"
             addActionListener {
                 val i = tabbedPane.indexOfTabComponent(panel)
                 if (i > 0) {
@@ -153,17 +176,18 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
             swapCenter(scrollPane)
             html("""
                 <html>
-                <body style="font-family:Arial,sans-serif;padding:28px 24px;text-align:center;">
+                <body style="font-family:Arial,sans-serif;padding:28px 24px;text-align:center;
+                             background:#1e1e1e;color:#cccccc;">
                   <br/>
                   <p style="font-size:28px;margin:0;">🔍</p>
-                  <h2 style="margin:10px 0 4px;color:#2B6CB0;">Niku Agent</h2>
-                  <p style="color:#888;margin:4px 0 20px;font-size:12px;">프론트엔드 코드 흐름 분석기</p>
-                  <p style="font-size:13px;line-height:1.6;">
+                  <h2 style="margin:10px 0 4px;color:#569cd6;">Niku Agent</h2>
+                  <p style="color:#777;margin:4px 0 20px;font-size:12px;">프론트엔드 코드 흐름 분석기</p>
+                  <p style="font-size:13px;line-height:1.7;color:#bbbbbb;">
                     분석할 파일을 열고<br/>
-                    <b>우클릭 → Analyze with Niku Agent</b><br/>
-                    또는 <b>Ctrl+Alt+N</b>
+                    <b style="color:#dcdcaa;">우클릭 → Analyze with Niku Agent</b><br/>
+                    또는 <b style="color:#dcdcaa;">Ctrl+Alt+N</b>
                   </p>
-                  <p style="color:#aaa;font-size:11px;margin-top:20px;">React · TypeScript · JavaScript</p>
+                  <p style="color:#555;font-size:11px;margin-top:20px;">React · TypeScript · JavaScript</p>
                 </body></html>
             """.trimIndent())
         }
@@ -175,10 +199,11 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         fun showLoading() {
             swapCenter(scrollPane)
             html("""
-                <html><body style="font-family:Arial,sans-serif;padding:28px;text-align:center;">
+                <html><body style="font-family:Arial,sans-serif;padding:28px;text-align:center;
+                                   background:#1e1e1e;color:#cccccc;">
                   <br/><p style="font-size:28px;">⏳</p>
-                  <p style="color:#2B6CB0;font-size:14px;font-weight:bold;">Claude에 요청 중...</p>
-                  <p style="color:#aaa;font-size:12px;">응답이 시작되면 실시간으로 표시됩니다.</p>
+                  <p style="color:#569cd6;font-size:14px;font-weight:bold;">Claude에 요청 중...</p>
+                  <p style="color:#666;font-size:12px;">응답이 시작되면 실시간으로 표시됩니다.</p>
                 </body></html>
             """.trimIndent())
         }
@@ -189,8 +214,10 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
                 val esc = accumulated
                     .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 resultPane.text = """
-                    <html><body style="font-family:monospace;padding:12px;color:#333;">
-                    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;margin:0;">$esc<span style="color:#2B6CB0;">▌</span></pre>
+                    <html><body style="font-family:monospace;padding:12px;
+                                       background:#1e1e1e;color:#d4d4d4;">
+                    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.5;margin:0;
+                                color:#d4d4d4;">$esc<span style="color:#569cd6;">▌</span></pre>
                     </body></html>
                 """.trimIndent()
                 resultPane.caretPosition = maxOf(0, resultPane.document.length - 1)
