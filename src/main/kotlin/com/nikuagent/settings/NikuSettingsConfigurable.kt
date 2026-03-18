@@ -13,6 +13,8 @@ import java.awt.FlowLayout
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -192,9 +194,14 @@ class NikuSettingsConfigurable : Configurable {
     // ── 로그인 플로우 ────────────────────────────────────────────────
 
     /**
-     * `claude /login` 프로세스를 백그라운드에서 실행한다.
-     * - JCEF 지원 환경: IDE 내 팝업 브라우저로 OAuth 진행 (외부 브라우저 불필요)
-     * - JCEF 미지원: OS 기본 브라우저로 fallback
+     * claude 인터랙티브 셸을 실행하고 stdin으로 `/login` 명령을 전송한다.
+     * `/login`은 CLI 인자가 아닌 셸 내부 슬래시 명령이기 때문에 stdin으로 전달해야 한다.
+     *
+     * 처리 흐름:
+     *  1. `claude` 프로세스 시작 → stdin에 `/login\n` 전송
+     *  2. stdout에서 OAuth URL 탐색 (최대 20초)
+     *  3. URL 발견 시 → JCEF 팝업 또는 시스템 브라우저로 표시
+     *  4. URL 미발견 시 → 수집된 출력 내용을 표시해 원인 파악 가능하게 함
      */
     private fun startLoginFlow(
         binaryPath: String,
@@ -206,90 +213,104 @@ class NikuSettingsConfigurable : Configurable {
         loginDialog?.dispose()
 
         SwingUtilities.invokeLater {
-            statusLabel.text = "⏳ 인증 창을 여는 중..."
+            statusLabel.text = "⏳ Claude CLI 시작 중..."
             loginButton.isEnabled = false
             cancelButton.isVisible = true
         }
 
         Thread {
             try {
-                val proc = ProcessBuilder(binaryPath, "/login")
-                    .redirectErrorStream(true)
-                    .start()
+                // ① claude 인터랙티브 셸 시작 (인자 없이)
+                val pb = ProcessBuilder(binaryPath).redirectErrorStream(true)
+                pb.environment()["TERM"] = "xterm-256color"
+                val proc = pb.start()
                 loginProcess = proc
 
-                val sb         = StringBuilder()
-                val ansiRegex  = Regex("""\u001B\[[0-9;]*[A-Za-z]""")
-                val urlRegex   = Regex("""https://\S{10,}""")
+                // ② stdin으로 /login 명령 전송 (스트림은 닫지 않음 — 셸이 살아있어야 함)
+                val stdinWriter = proc.outputStream.bufferedWriter()
+                stdinWriter.write("/login\n")
+                stdinWriter.flush()
+
+                val sb        = StringBuilder()
+                val ansiRegex = Regex("""\u001B\[[0-9;]*[A-Za-z]|\r""")
+                // 괄호·마침표 등 불필요한 trailing 문자를 제외한 URL 매칭
+                val urlRegex  = Regex("""https://[A-Za-z0-9\-._~:/?#\[\]@!$&'*+,;=%]{15,}""")
                 var urlHandled = false
 
-                // stdout을 읽으며 OAuth URL 탐색
+                // ③ stdout 리더 스레드 — URL 탐색 + 실시간 상태 표시
                 val readerThread = Thread {
-                    proc.inputStream.bufferedReader().use { reader ->
-                        val buf = CharArray(256)
-                        while (true) {
-                            val n = reader.read(buf)
-                            if (n < 0) break
-                            synchronized(sb) { sb.append(buf, 0, n) }
+                    try {
+                        proc.inputStream.bufferedReader().use { reader ->
+                            val buf = CharArray(512)
+                            while (true) {
+                                val n = reader.read(buf)
+                                if (n < 0) break
+                                synchronized(sb) { sb.append(buf, 0, n) }
 
-                            if (!urlHandled) {
                                 val clean = ansiRegex.replace(synchronized(sb) { sb.toString() }, "")
-                                val url   = urlRegex.find(clean)?.value?.trimEnd(')', '.', ',')
-                                if (url != null) {
-                                    urlHandled = true
-                                    SwingUtilities.invokeLater {
-                                        if (JBCefApp.isSupported()) {
-                                            showJcefLoginDialog(url, proc, statusLabel, loginButton, cancelButton)
-                                        } else {
-                                            openBrowser(url)
-                                            statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
+
+                                // URL이 아직 처리되지 않은 경우 탐색
+                                if (!urlHandled) {
+                                    val url = urlRegex.find(clean)?.value
+                                        ?.trimEnd(')', '.', ',', '\'', '"')
+                                    if (url != null) {
+                                        urlHandled = true
+                                        SwingUtilities.invokeLater {
+                                            if (JBCefApp.isSupported()) {
+                                                statusLabel.text = "🌐 IDE 내 브라우저에서 로그인을 완료해주세요..."
+                                                showJcefLoginDialog(url, proc, statusLabel, loginButton, cancelButton)
+                                            } else {
+                                                openBrowser(url)
+                                                statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요. 완료 후 '로그인 상태 확인'을 눌러주세요."
+                                            }
+                                        }
+                                    } else {
+                                        // URL 미발견 시 수신 내용을 실시간으로 표시 (최대 120자)
+                                        val preview = clean.trim().takeLast(120)
+                                        if (preview.isNotBlank()) {
+                                            SwingUtilities.invokeLater {
+                                                statusLabel.text = "⏳ $preview"
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
+                    } catch (_: Exception) {}
                 }
                 readerThread.isDaemon = true
                 readerThread.start()
 
-                val exitCode = runCatching {
-                    proc.waitFor(3, TimeUnit.MINUTES); proc.exitValue()
-                }.getOrDefault(-1)
-                loginProcess = null
-                readerThread.join(2_000)
-
-                // JCEF 모드에서는 다이얼로그가 완료를 처리하므로 여기서는 팝업만 닫음
-                SwingUtilities.invokeLater { loginDialog?.dispose(); loginDialog = null }
+                // ④ URL 발견 대기 (최대 20초)
+                val deadline = System.currentTimeMillis() + 20_000
+                while (!urlHandled && System.currentTimeMillis() < deadline && proc.isAlive) {
+                    Thread.sleep(300)
+                }
 
                 if (!urlHandled) {
-                    // URL 파싱 실패 — claude가 자체적으로 브라우저를 열었을 수 있음
-                    val output = synchronized(sb) { sb.toString() }
-                    val finalStatus = when {
-                        exitCode == 0 -> "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
-                        else          -> "⚠️ 인증 URL을 찾지 못했습니다 (코드: $exitCode). 터미널에서 `claude /login`을 실행해주세요.\n출력: $output"
-                    }
+                    // URL을 찾지 못한 경우 — 실제 출력 내용을 사용자에게 보여줌
+                    runCatching { stdinWriter.close() }
+                    proc.destroyForcibly()
+                    loginProcess = null
+                    readerThread.join(2_000)
+
+                    val raw = ansiRegex.replace(synchronized(sb) { sb.toString() }, "").trim()
                     SwingUtilities.invokeLater {
-                        statusLabel.text = finalStatus
-                        loginButton.isEnabled = true
-                        cancelButton.isVisible = false
-                    }
-                } else if (!JBCefApp.isSupported()) {
-                    // 시스템 브라우저 fallback 모드에서 프로세스 완료 처리
-                    val output = synchronized(sb) { sb.toString() }
-                    val finalStatus = when {
-                        exitCode == 0 -> "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
-                        output.contains("error", ignoreCase = true) -> "❌ 로그인 실패. 다시 시도해주세요."
-                        exitCode == -1 -> "⚠️ 로그인이 취소되었습니다."
-                        else -> "⚠️ 종료 코드: $exitCode"
-                    }
-                    SwingUtilities.invokeLater {
-                        statusLabel.text = finalStatus
+                        statusLabel.text = if (raw.isNotBlank()) {
+                            "⚠️ 인증 URL을 찾지 못했습니다.\n" +
+                            "CLI 출력: ${raw.take(300)}\n\n" +
+                            "터미널에서 직접 `claude /login`을 실행해주세요."
+                        } else {
+                            "⚠️ Claude CLI가 응답하지 않습니다.\n" +
+                            "CLI 경로가 올바른지 확인하고 터미널에서 `claude /login`을 실행해주세요."
+                        }
                         loginButton.isEnabled = true
                         cancelButton.isVisible = false
                     }
                 }
-                // JCEF 모드에서는 showJcefLoginDialog 내 windowClosed에서 처리
+                // JCEF 모드: showJcefLoginDialog 내 watcher 스레드가 완료를 처리
+                // 시스템 브라우저 모드: 사용자가 완료 후 '로그인 상태 확인'으로 검증
+
             } catch (e: Exception) {
                 loginProcess = null
                 SwingUtilities.invokeLater {
@@ -370,9 +391,8 @@ class NikuSettingsConfigurable : Configurable {
     // ── 로그인 상태 확인 ─────────────────────────────────────────────
 
     /**
-     * claude --print 으로 짧은 프롬프트를 보내고
-     * "Not logged in" 여부를 빠르게 확인한다.
-     * 응답 첫 청크가 오거나 에러가 감지되면 즉시 프로세스를 종료한다.
+     * `claude --version` 실행 후 `claude --print`로 미로그인 메시지를 감지한다.
+     * API 호출을 최소화하기 위해 "Not logged in" 판단만 하고 즉시 프로세스를 종료한다.
      */
     private fun checkLoginStatus(binaryPath: String): String {
         var proc: Process? = null
@@ -381,47 +401,63 @@ class NikuSettingsConfigurable : Configurable {
                 .redirectErrorStream(true)
                 .start()
 
-            proc.outputStream.bufferedWriter().use { it.write("1+1=?") }
+            // stdin 즉시 닫아 EOF 신호 — "--print" 모드는 stdin이 EOF이면 빈 입력으로 처리됨
+            // 빈 입력 시 로그인 에러 메시지가 바로 출력되므로 별도 텍스트 전송 불필요
+            proc.outputStream.close()
 
-            val sb = StringBuilder()
-            var earlyResult: String? = null
+            val sb         = StringBuilder()
+            val earlyResult = AtomicReference<String>(null)
+            val done        = AtomicBoolean(false)
 
             val readerThread = Thread {
                 try {
                     proc.inputStream.bufferedReader().use { reader ->
                         val buf = CharArray(512)
-                        while (true) {
+                        while (!done.get()) {
                             val n = reader.read(buf)
                             if (n < 0) break
                             synchronized(sb) { sb.append(buf, 0, n) }
                             val current = synchronized(sb) { sb.toString() }
                             when {
                                 current.contains("Not logged in", ignoreCase = true) ||
-                                current.contains("Please run /login", ignoreCase = true) -> {
-                                    earlyResult = "❌ 로그인되어 있지 않습니다. '로그인' 버튼을 클릭해주세요."
-                                    proc.destroyForcibly(); break
+                                current.contains("Please run /login", ignoreCase = true) ||
+                                current.contains("not logged", ignoreCase = true) -> {
+                                    earlyResult.set("❌ 로그인되어 있지 않습니다. '로그인' 버튼을 클릭해주세요.")
+                                    done.set(true)
+                                    proc.destroyForcibly()
+                                    break
                                 }
-                                current.isNotBlank() -> {
-                                    earlyResult = "✅ 로그인 상태 정상"
-                                    proc.destroyForcibly(); break
+                                current.length > 5 -> {
+                                    earlyResult.set("✅ 로그인 상태 정상")
+                                    done.set(true)
+                                    proc.destroyForcibly()
+                                    break
                                 }
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) { done.set(true) }
             }
             readerThread.isDaemon = true
             readerThread.start()
 
-            proc.waitFor(8, TimeUnit.SECONDS)
+            // 최대 10초 대기 — earlyResult 세팅 시 즉시 반환
+            val deadline = System.currentTimeMillis() + 10_000
+            while (earlyResult.get() == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100)
+            }
+            done.set(true)
             proc.destroyForcibly()
-            readerThread.join(2_000)
+            readerThread.join(1_000)
 
-            earlyResult ?: when {
-                synchronized(sb) { sb.toString() }.contains("Not logged in", ignoreCase = true) ->
-                    "❌ 로그인되어 있지 않습니다. '로그인' 버튼을 클릭해주세요."
-                synchronized(sb) { sb.isNotEmpty() } -> "✅ 로그인 상태 정상"
-                else -> "⚠️ 응답 없음 — CLI 경로를 확인해주세요."
+            earlyResult.get() ?: run {
+                val out = synchronized(sb) { sb.toString() }
+                when {
+                    out.contains("Not logged in", ignoreCase = true) ->
+                        "❌ 로그인되어 있지 않습니다. '로그인' 버튼을 클릭해주세요."
+                    out.isNotBlank() -> "✅ 로그인 상태 정상"
+                    else -> "⚠️ 응답 없음 — CLI 경로를 확인하거나 다시 시도해주세요."
+                }
             }
         } catch (e: Exception) {
             "❌ 확인 실패: ${e.message}"
