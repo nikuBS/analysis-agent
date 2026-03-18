@@ -63,6 +63,11 @@ object ResultFormatter {
                      background: #2d2d2d; color: #4ec9b0; padding: 1px 5px; }
               .ok  { color: #6a9955; }
               .warn { color: #ce9178; }
+              table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+              th   { padding: 6px 10px; background: #2d2d2d; color: #9cdcfe;
+                     border: 1px solid #3c3c3c; text-align: left; font-weight: bold; }
+              td   { padding: 5px 10px; border: 1px solid #3c3c3c; color: #cccccc; }
+              tr:nth-child(even) td { background: #252526; }
             </style></head>
             <body>
               <div class="meta"><b>${escapeHtml(context.fileName)}</b>
@@ -93,10 +98,23 @@ object ResultFormatter {
     private fun markdownToHtml(md: String): String {
         var html = escapeHtml(md)
 
+        // Mermaid 다이어그램 블록 — 일반 코드 블록보다 먼저 처리
+        html = html.replace(Regex("```mermaid\\n([\\s\\S]*?)```", RegexOption.MULTILINE)) { m ->
+            val code = m.groupValues[1].trimEnd()
+            "<div style='background:#1a1a2e;border:1px solid #569cd6;border-radius:4px;" +
+            "padding:12px;margin:8px 0;'>" +
+            "<div style='color:#569cd6;font-size:11px;font-weight:bold;margin-bottom:8px;'>" +
+            "📊 흐름 다이어그램 (Mermaid)</div>" +
+            "<pre style='color:#a8d8ea;margin:0;font-size:11px;line-height:1.6;'>$code</pre></div>"
+        }
+
         // 코드 블록 (``` ... ```) — 인라인 코드보다 먼저 처리
         html = html.replace(Regex("```[\\w]*\\n([\\s\\S]*?)```", RegexOption.MULTILINE)) { m ->
             "<pre>${m.groupValues[1].trimEnd()}</pre>"
         }
+
+        // 마크다운 표 — H2/H3 이전에 처리
+        html = buildTables(html)
 
         // H2 / H3
         html = html.replace(Regex("^## (.+)$",  RegexOption.MULTILINE)) { "<h2>${it.groupValues[1]}</h2>" }
@@ -164,4 +182,61 @@ object ResultFormatter {
         if (inOl) result.append("</ol>")
         return result.toString()
     }
+
+    /**
+     * 마크다운 표 (`| col | col |` 형식) → HTML `<table>` 로 변환.
+     * 구분선 행(|---|---| 패턴)을 기준으로 헤더와 바디를 분리한다.
+     */
+    private fun buildTables(html: String): String {
+        val lines  = html.split("\n")
+        val result = StringBuilder()
+        var i      = 0
+
+        while (i < lines.size) {
+            val line = lines[i]
+
+            // 표 헤더 후보: | ... | 패턴
+            if (line.trimStart().startsWith("|") && line.trimEnd().endsWith("|")) {
+                val separatorIdx = i + 1
+                val isSeparator  = separatorIdx < lines.size &&
+                    lines[separatorIdx].matches(Regex("""^\|[\s|:\-]+\|$"""))
+
+                if (isSeparator) {
+                    // 헤더 행 파싱
+                    val headers = parseCells(line)
+                    result.append("<table><thead><tr>")
+                    headers.forEach { h ->
+                        result.append("<th>$h</th>")
+                    }
+                    result.append("</tr></thead><tbody>")
+
+                    // 구분선 스킵 후 데이터 행 수집
+                    var j = i + 2
+                    while (j < lines.size &&
+                           lines[j].trimStart().startsWith("|") &&
+                           lines[j].trimEnd().endsWith("|")) {
+                        val cells = parseCells(lines[j])
+                        result.append("<tr>")
+                        cells.forEach { c -> result.append("<td>$c</td>") }
+                        result.append("</tr>")
+                        j++
+                    }
+                    result.append("</tbody></table>\n")
+                    i = j
+                    continue
+                }
+            }
+
+            result.append(line).append("\n")
+            i++
+        }
+        return result.toString()
+    }
+
+    /** `| a | b | c |` → `["a", "b", "c"]` */
+    private fun parseCells(line: String): List<String> =
+        line.trim().removePrefix("|").removeSuffix("|")
+            .split("|")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 }
