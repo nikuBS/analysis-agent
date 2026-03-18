@@ -5,10 +5,14 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.nikuagent.context.FileContext
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -18,59 +22,72 @@ import javax.swing.JEditorPane
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JRadioButton
-import javax.swing.JTabbedPane
 import javax.swing.SwingUtilities
 
 /**
  * Niku Agent Tool Window 메인 패널.
  *
- * 다크 모드 고정 (배경 #1e1e1e / 텍스트 #cccccc).
+ * JTabbedPane 대신 커스텀 탭 바를 직접 구현 (IntelliJ L&F 영향 없음).
  *
  * 구조:
- *  - CENTER: JTabbedPane
- *    - 탭 0 🏠 홈 (닫기 불가)
- *    - 탭 1~N 분석 결과 (닫기 가능, 제목 = 파일명 + 컨텍스트)
+ *  - NORTH : 커스텀 TabBar (JPanel + FlowLayout)
+ *  - CENTER: 컨텐츠 영역 (CardLayout)
  */
 class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     // ── 다크 테마 팔레트 ──────────────────────────────────────────
     companion object {
-        val BG        = Color(0x1e1e1e)   // 본문 배경
-        val BG_PANEL  = Color(0x252526)   // 패널 배경
-        val BG_INPUT  = Color(0x3c3c3c)   // 입력란 배경
-        val FG        = Color(0xcccccc)   // 기본 텍스트
-        val FG_DIM    = Color(0x888888)   // 보조 텍스트
-        val FG_CLOSE  = Color(0x999999)   // 닫기 버튼
-        val ACCENT    = Color(0x569cd6)   // 강조 파랑
-        val BTN_BG    = Color(0x0e639c)   // 분석 버튼 배경
-        val BTN_FG    = Color(0xffffff)   // 분석 버튼 텍스트
-        val BORDER    = Color(0x3c3c3c)   // 구분선
+        val BG             = Color(0x1e1e1e)   // 본문 배경
+        val BG_PANEL       = Color(0x252526)   // 패널 배경
+        val BG_TAB_ACTIVE  = Color(0x1e1e1e)   // 선택된 탭 배경
+        val BG_TAB_IDLE    = Color(0x2d2d2d)   // 비선택 탭 배경
+        val BG_TABBAR      = Color(0x252526)   // 탭 바 배경
+        val BG_INPUT       = Color(0x3c3c3c)   // 입력란 배경
+        val FG             = Color(0xcccccc)   // 기본 텍스트
+        val FG_DIM         = Color(0x888888)   // 비선택 탭 텍스트
+        val FG_CLOSE       = Color(0x777777)   // 닫기 버튼
+        val ACCENT         = Color(0x569cd6)   // 강조 파랑
+        val BTN_BG         = Color(0x0e639c)   // 분석 버튼 배경
+        val BTN_FG         = Color(0xffffff)   // 분석 버튼 텍스트
+        val BORDER         = Color(0x3c3c3c)   // 구분선
     }
 
-    private val tabbedPane = JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT).apply {
-        background = BG_PANEL
-        foreground = FG
+    // ── 탭 데이터 ────────────────────────────────────────────────
+
+    private data class TabEntry(
+        val id: Int,
+        val contentPanel: AnalysisTabPanel,
+        val headerPanel: JPanel,
+        val titleLabel: JLabel,
+    )
+
+    private val tabs    = mutableListOf<TabEntry>()
+    private var nextId  = 0
+    private var activeId: Int = -1
+
+    // ── UI 컴포넌트 ──────────────────────────────────────────────
+
+    /** 탭 헤더 버튼들이 나란히 나열되는 상단 바 */
+    private val tabBar = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        background  = BG_TABBAR
+        isOpaque    = true
+        minimumSize = Dimension(0, 34)
+        border      = BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER)
+    }
+
+    /** CardLayout 으로 탭 내용을 교체하는 중앙 영역 */
+    private val contentArea = JPanel(CardLayout()).apply {
+        background = BG
         isOpaque   = true
-        // 탭 스트립 색상 강제 지정
-        putClientProperty("TabbedPane.tabAreaBackground", BG_PANEL)
-        putClientProperty("TabbedPane.selectedBackground", BG)
     }
-
-    private var activeTabIndex: Int = 0
 
     init {
         background = BG
         border     = null
-        // 탭 스트립 색상을 UIManager에서도 오버라이드
-        javax.swing.UIManager.put("TabbedPane.background",          BG_PANEL)
-        javax.swing.UIManager.put("TabbedPane.foreground",          FG)
-        javax.swing.UIManager.put("TabbedPane.selected",            BG)
-        javax.swing.UIManager.put("TabbedPane.tabAreaBackground",   BG_PANEL)
-        javax.swing.UIManager.put("TabbedPane.darkShadow",          BORDER)
-        javax.swing.UIManager.put("TabbedPane.shadow",              BORDER)
-        javax.swing.UIManager.put("TabbedPane.highlight",           BG_PANEL)
-        javax.swing.UIManager.put("TabbedPane.light",               BG_PANEL)
-        add(tabbedPane, BorderLayout.CENTER)
+
+        add(tabBar,     BorderLayout.NORTH)
+        add(contentArea, BorderLayout.CENTER)
+
         addWelcomeTab()
     }
 
@@ -78,39 +95,140 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     fun showOptions(context: FileContext, onAnalyze: (customPrompt: String?) -> Unit) {
         SwingUtilities.invokeLater {
-            val idx = addAnalysisTab(context)
-            activeTabIndex = idx
-            getTabPanel(idx).showOptions(context, onAnalyze)
+            val id = addAnalysisTab(context)
+            activeId = id
+            getContent(id).showOptions(context, onAnalyze)
         }
     }
 
-    fun showLoading()                      = invokeOnActive { it.showLoading() }
-    fun showStreaming(text: String)        = invokeOnActive { it.showStreaming(text) }
+    fun showLoading()                  = invokeOnActive { it.showLoading() }
+    fun showStreaming(text: String)    = invokeOnActive { it.showStreaming(text) }
     fun showLoginRequired(retry: (() -> Unit)? = null) = invokeOnActive { it.showLoginRequired(retry) }
 
     fun showResult(html: String) {
         invokeOnActive { it.showResult(html) }
-        SwingUtilities.invokeLater { finishTabTitle(activeTabIndex) }
+        SwingUtilities.invokeLater { stripSpinner(activeId) }
     }
 
-    // ── 탭 관리 ──────────────────────────────────────────────────
+    // ── 탭 추가/삭제/선택 ─────────────────────────────────────────
 
     private fun addWelcomeTab() {
         val panel = AnalysisTabPanel().also { it.showWelcome() }
-        tabbedPane.addTab("🏠 홈", panel)
-        // 홈 탭은 닫기 버튼 없이 일반 탭 컴포넌트 사용
-        tabbedPane.setTabComponentAt(0, makePlainHeader("🏠 홈"))
+        addTabInternal("🏠 홈", panel, closeable = false)
     }
 
     private fun addAnalysisTab(context: FileContext): Int {
         val panel = AnalysisTabPanel()
         val title = buildTabTitle(context)
-        val idx   = tabbedPane.tabCount
-        tabbedPane.addTab(title, panel)
-        tabbedPane.setTabComponentAt(idx, makeCloseableHeader("⏳ $title", closeable = true))
-        tabbedPane.selectedIndex = idx
-        return idx
+        return addTabInternal("⏳ $title", panel, closeable = true)
     }
+
+    private fun addTabInternal(title: String, panel: AnalysisTabPanel, closeable: Boolean): Int {
+        val id = nextId++
+
+        val titleLabel = JLabel(title).apply {
+            foreground = FG_DIM
+            font       = Font("Arial", Font.PLAIN, 12)
+        }
+
+        val header = buildTabHeader(id, titleLabel, closeable)
+
+        val entry = TabEntry(id, panel, header, titleLabel)
+        tabs.add(entry)
+
+        contentArea.add(panel, id.toString())
+        tabBar.add(header)
+        tabBar.revalidate()
+        tabBar.repaint()
+
+        selectTab(id)
+        return id
+    }
+
+    private fun selectTab(id: Int) {
+        activeId = id
+        (contentArea.layout as CardLayout).show(contentArea, id.toString())
+
+        for (tab in tabs) {
+            val active = tab.id == id
+            applyTabStyle(tab, active)
+        }
+        tabBar.revalidate()
+        tabBar.repaint()
+    }
+
+    private fun removeTab(id: Int) {
+        val idx = tabs.indexOfFirst { it.id == id }
+        if (idx < 0) return
+        val tab = tabs[idx]
+
+        tabBar.remove(tab.headerPanel)
+        contentArea.remove(tab.contentPanel)
+        tabs.removeAt(idx)
+        tabBar.revalidate()
+        tabBar.repaint()
+        contentArea.revalidate()
+        contentArea.repaint()
+
+        if (activeId == id && tabs.isNotEmpty()) {
+            selectTab(tabs[maxOf(0, idx - 1)].id)
+        }
+    }
+
+    // ── 탭 헤더 스타일 ─────────────────────────────────────────────
+
+    private fun buildTabHeader(id: Int, label: JLabel, closeable: Boolean): JPanel {
+        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = true
+            cursor   = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            add(label)
+        }
+
+        if (closeable) {
+            val closeLabel = JLabel("  ×").apply {
+                foreground = FG_CLOSE
+                font       = Font("Arial", Font.BOLD, 13)
+                cursor     = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            }
+            closeLabel.addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    removeTab(id)
+                    e.consume()
+                }
+                override fun mouseEntered(e: MouseEvent) { closeLabel.foreground = FG }
+                override fun mouseExited(e: MouseEvent)  { closeLabel.foreground = FG_CLOSE }
+            })
+            panel.add(closeLabel)
+        }
+
+        panel.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) { selectTab(id) }
+        })
+
+        return panel
+    }
+
+    private fun applyTabStyle(tab: TabEntry, active: Boolean) {
+        tab.headerPanel.background = if (active) BG_TAB_ACTIVE else BG_TAB_IDLE
+        tab.titleLabel.foreground  = if (active) FG else FG_DIM
+
+        tab.headerPanel.border = if (active) {
+            // 선택된 탭: 상단 강조 파란 줄 + 좌우 구분선
+            BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(2, 1, 0, 1, ACCENT),
+                BorderFactory.createEmptyBorder(5, 10, 6, 8),
+            )
+        } else {
+            // 비선택 탭: 우측 구분선만
+            BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER),
+                BorderFactory.createEmptyBorder(7, 10, 6, 8),
+            )
+        }
+        tab.headerPanel.repaint()
+    }
+
+    // ── 유틸 ──────────────────────────────────────────────────────
 
     private fun buildTabTitle(ctx: FileContext): String = when {
         ctx.focusFunctionName != null -> "${ctx.fileName} › ${ctx.focusFunctionName}"
@@ -119,75 +237,18 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
     }
 
     /** 분석 완료 시 탭 제목의 ⏳ 제거 */
-    private fun finishTabTitle(idx: Int) {
-        val comp  = tabbedPane.getTabComponentAt(idx) as? JPanel ?: return
-        val label = comp.components.filterIsInstance<JLabel>().firstOrNull() ?: return
-        label.text = label.text.removePrefix("⏳ ")
+    private fun stripSpinner(id: Int) {
+        tabs.find { it.id == id }?.titleLabel?.let {
+            it.text = it.text.removePrefix("⏳ ")
+        }
     }
 
-    private fun getTabPanel(i: Int) = tabbedPane.getComponentAt(i) as AnalysisTabPanel
+    private fun getContent(id: Int) = tabs.first { it.id == id }.contentPanel
 
     private fun invokeOnActive(block: (AnalysisTabPanel) -> Unit) {
         SwingUtilities.invokeLater {
-            val i = activeTabIndex
-            if (i in 0 until tabbedPane.tabCount) block(getTabPanel(i))
+            tabs.find { it.id == activeId }?.let { block(it.contentPanel) }
         }
-    }
-
-    // ── 탭 헤더 컴포넌트 ─────────────────────────────────────────
-
-    /** 닫기 버튼 없는 일반 탭 헤더 (홈 탭용) */
-    private fun makePlainHeader(title: String): JPanel =
-        JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
-            isOpaque   = true
-            background = BG_PANEL
-            border     = BorderFactory.createEmptyBorder(2, 4, 2, 4)
-            add(JLabel(title).apply {
-                foreground = FG
-                font       = font.deriveFont(Font.PLAIN, 12f)
-            })
-        }
-
-    /**
-     * 닫기(×) 버튼이 있는 탭 헤더.
-     * 다크 배경 고정: foreground = #cccccc, 닫기 버튼 = #999999
-     */
-    private fun makeCloseableHeader(title: String, closeable: Boolean): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 2, 2)).apply {
-            isOpaque   = true
-            background = BG_PANEL
-            border     = BorderFactory.createEmptyBorder(2, 4, 2, 2)
-        }
-
-        val label = JLabel(title).apply {
-            foreground = FG
-            font       = font.deriveFont(Font.PLAIN, 12f)
-        }
-
-        panel.add(label)
-
-        if (closeable) {
-            val closeBtn = JButton("×").apply {
-                preferredSize       = Dimension(16, 16)
-                isBorderPainted     = false
-                isContentAreaFilled = false
-                isFocusPainted      = false
-                foreground          = FG_CLOSE
-                font                = font.deriveFont(Font.BOLD, 13f)
-                toolTipText         = "닫기"
-                addActionListener {
-                    val i = tabbedPane.indexOfTabComponent(panel)
-                    if (i > 0) {
-                        tabbedPane.removeTabAt(i)
-                        if (activeTabIndex >= tabbedPane.tabCount)
-                            activeTabIndex = tabbedPane.tabCount - 1
-                    }
-                }
-            }
-            panel.add(closeBtn)
-        }
-
-        return panel
     }
 
     // ── 탭 내용 패널 ─────────────────────────────────────────────
@@ -203,8 +264,8 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
             font = Font("Arial", Font.PLAIN, 13)
         }
         private val scrollPane = JBScrollPane(resultPane).apply {
-            border          = null
-            background      = BG
+            border              = null
+            background          = BG
             viewport.background = BG
         }
 
@@ -289,17 +350,11 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     private fun buildOptionsPanel(context: FileContext, onAnalyze: (String?) -> Unit): JPanel {
 
-        fun JPanel.dark()  { background = BG_PANEL; isOpaque = true }
-        fun JLabel.light() { foreground = FG }
-        fun JRadioButton.darkStyle() {
-            background = BG_PANEL; foreground = FG; isOpaque = true
-        }
-
         val root = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(12, 14, 12, 14)
+            layout     = BoxLayout(this, BoxLayout.Y_AXIS)
+            border     = BorderFactory.createEmptyBorder(12, 14, 12, 14)
             background = BG_PANEL
-            isOpaque = true
+            isOpaque   = true
         }
 
         // 파일 정보 한 줄
@@ -316,26 +371,27 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
             " &nbsp;$target</html>"
         ).apply {
             alignmentX = LEFT_ALIGNMENT
-            border = BorderFactory.createEmptyBorder(0, 0, 6, 0)
+            border     = BorderFactory.createEmptyBorder(0, 0, 6, 0)
         }
         root.add(fileLabel)
 
         // 구분선
         root.add(Box.createVerticalStrut(2))
-        val sep = JPanel().apply {
-            maximumSize = Dimension(Int.MAX_VALUE, 1)
+        root.add(JPanel().apply {
+            maximumSize   = Dimension(Int.MAX_VALUE, 1)
             preferredSize = Dimension(0, 1)
-            background = BORDER; isOpaque = true
-        }
-        root.add(sep)
+            background    = BORDER; isOpaque = true
+        })
         root.add(Box.createVerticalStrut(8))
 
         // 라디오 버튼
         val standardRadio = JRadioButton("표준 분석").apply {
-            isSelected = true; font = font.deriveFont(12f); darkStyle()
+            isSelected = true; font = font.deriveFont(12f)
+            background = BG_PANEL; foreground = FG; isOpaque = true
         }
         val customRadio = JRadioButton("커스텀 질문").apply {
-            font = font.deriveFont(12f); darkStyle()
+            font = font.deriveFont(12f)
+            background = BG_PANEL; foreground = FG; isOpaque = true
         }
         ButtonGroup().apply { add(standardRadio); add(customRadio) }
 
@@ -354,11 +410,11 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
             emptyText.text = "예: 이 컴포넌트의 렌더링 조건을 정리해줘"
         }
         val promptScroll = JBScrollPane(promptArea).apply {
-            isVisible = false
-            alignmentX = LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, 88)
+            isVisible     = false
+            alignmentX    = LEFT_ALIGNMENT
+            maximumSize   = Dimension(Int.MAX_VALUE, 88)
             preferredSize = Dimension(400, 72)
-            border = BorderFactory.createLineBorder(BORDER)
+            border        = BorderFactory.createLineBorder(BORDER)
             viewport.background = BG_INPUT
         }
         root.add(Box.createVerticalStrut(6))
@@ -376,19 +432,18 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
         // 분석 시작 버튼
         val analyzeBtn = JButton("▶  분석 시작").apply {
-            font = Font(font.name, Font.BOLD, 12)
-            background = BTN_BG; foreground = BTN_FG
-            isFocusPainted = false; isBorderPainted = false; isOpaque = true
+            font              = Font(font.name, Font.BOLD, 12)
+            background        = BTN_BG; foreground = BTN_FG
+            isFocusPainted    = false; isBorderPainted = false; isOpaque = true
         }
         analyzeBtn.addActionListener {
             val prompt = if (customRadio.isSelected)
                 promptArea.text.trim().takeIf { it.isNotBlank() } else null
             onAnalyze(prompt)
         }
-        val btnRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        root.add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             alignmentX = LEFT_ALIGNMENT; background = BG_PANEL; isOpaque = true; add(analyzeBtn)
-        }
-        root.add(btnRow)
+        })
 
         return root
     }
@@ -397,29 +452,25 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     private fun buildLoginPanel(onRetry: (() -> Unit)?): JPanel {
         val root = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(24, 20, 20, 20)
+            layout     = BoxLayout(this, BoxLayout.Y_AXIS)
+            border     = BorderFactory.createEmptyBorder(24, 20, 20, 20)
             background = BG; isOpaque = true
         }
 
-        val icon = JLabel("🔐").apply {
-            font = font.deriveFont(30f); alignmentX = CENTER_ALIGNMENT
-        }
-        val heading = JBLabel("로그인이 필요합니다").apply {
-            font = Font(font.name, Font.BOLD, 15)
+        root.add(JLabel("🔐").apply {
+            font       = font.deriveFont(30f); alignmentX = CENTER_ALIGNMENT
+        })
+        root.add(Box.createVerticalStrut(10))
+        root.add(JBLabel("로그인이 필요합니다").apply {
+            font       = Font(font.name, Font.BOLD, 15)
             foreground = FG; alignmentX = CENTER_ALIGNMENT
-        }
-        val desc = JBLabel(
+        })
+        root.add(Box.createVerticalStrut(6))
+        root.add(JBLabel(
             "<html><div style='text-align:center;color:#888;font-size:12px;'>" +
             "Settings → Tools → Niku Agent 에서<br/>로그인 버튼을 클릭해주세요." +
             "</div></html>"
-        ).apply { alignmentX = CENTER_ALIGNMENT }
-
-        root.add(icon)
-        root.add(Box.createVerticalStrut(10))
-        root.add(heading)
-        root.add(Box.createVerticalStrut(6))
-        root.add(desc)
+        ).apply { alignmentX = CENTER_ALIGNMENT })
 
         if (onRetry != null) {
             root.add(Box.createVerticalStrut(16))
