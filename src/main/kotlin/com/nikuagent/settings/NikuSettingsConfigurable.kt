@@ -3,13 +3,20 @@ package com.nikuagent.settings
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.jcef.JBCefApp
+import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.util.ui.FormBuilder
 import com.nikuagent.service.CliLlmClient
+import java.awt.BorderLayout
+import java.awt.Dialog
 import java.awt.FlowLayout
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.util.concurrent.TimeUnit
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.JDialog
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
@@ -30,6 +37,8 @@ class NikuSettingsConfigurable : Configurable {
 
     /** 진행 중인 claude /login 프로세스 (취소 시 종료) */
     @Volatile private var loginProcess: Process? = null
+    /** 진행 중인 로그인 팝업 다이얼로그 */
+    @Volatile private var loginDialog: JDialog? = null
 
     override fun getDisplayName(): String = "Niku Agent"
 
@@ -172,6 +181,8 @@ class NikuSettingsConfigurable : Configurable {
     override fun disposeUIResources() {
         loginProcess?.destroyForcibly()
         loginProcess = null
+        loginDialog?.dispose()
+        loginDialog = null
         panel = null
         binaryPathField = null
         modelCombo = null
@@ -181,9 +192,9 @@ class NikuSettingsConfigurable : Configurable {
     // ── 로그인 플로우 ────────────────────────────────────────────────
 
     /**
-     * `claude /login` 프로세스를 백그라운드에서 실행하고
-     * stdout에서 OAuth URL을 파싱해 시스템 브라우저로 연다.
-     * 프로세스가 정상 종료되면 로그인 완료로 처리한다.
+     * `claude /login` 프로세스를 백그라운드에서 실행한다.
+     * - JCEF 지원 환경: IDE 내 팝업 브라우저로 OAuth 진행 (외부 브라우저 불필요)
+     * - JCEF 미지원: OS 기본 브라우저로 fallback
      */
     private fun startLoginFlow(
         binaryPath: String,
@@ -191,11 +202,11 @@ class NikuSettingsConfigurable : Configurable {
         loginButton: JButton,
         cancelButton: JButton,
     ) {
-        // 이전 로그인 프로세스가 있으면 종료
         loginProcess?.destroyForcibly()
+        loginDialog?.dispose()
 
         SwingUtilities.invokeLater {
-            statusLabel.text = "⏳ 브라우저에서 인증을 진행해주세요..."
+            statusLabel.text = "⏳ 인증 창을 여는 중..."
             loginButton.isEnabled = false
             cancelButton.isVisible = true
         }
@@ -207,62 +218,78 @@ class NikuSettingsConfigurable : Configurable {
                     .start()
                 loginProcess = proc
 
-                val sb = StringBuilder()
-                // ANSI 이스케이프 코드 제거용 (ESC[...m 등)
-                val ansiRegex = Regex("""\u001B\[[0-9;]*[A-Za-z]""")
-                val urlRegex  = Regex("""https://\S{10,}""")
-                var browserOpened = false
+                val sb         = StringBuilder()
+                val ansiRegex  = Regex("""\u001B\[[0-9;]*[A-Za-z]""")
+                val urlRegex   = Regex("""https://\S{10,}""")
+                var urlHandled = false
 
-                // stdout + stderr(merged) 읽으며 URL 파싱
-                proc.inputStream.bufferedReader().use { reader ->
-                    val buf = CharArray(256)
-                    while (true) {
-                        val n = reader.read(buf)
-                        if (n < 0) break
-                        sb.append(buf, 0, n)
+                // stdout을 읽으며 OAuth URL 탐색
+                val readerThread = Thread {
+                    proc.inputStream.bufferedReader().use { reader ->
+                        val buf = CharArray(256)
+                        while (true) {
+                            val n = reader.read(buf)
+                            if (n < 0) break
+                            synchronized(sb) { sb.append(buf, 0, n) }
 
-                        if (!browserOpened) {
-                            val clean = ansiRegex.replace(sb.toString(), "")
-                            val url   = urlRegex.find(clean)?.value?.trimEnd(')', '.', ',')
-                            if (url != null) {
-                                browserOpened = true
-                                openBrowser(url)
-                                SwingUtilities.invokeLater {
-                                    statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
+                            if (!urlHandled) {
+                                val clean = ansiRegex.replace(synchronized(sb) { sb.toString() }, "")
+                                val url   = urlRegex.find(clean)?.value?.trimEnd(')', '.', ',')
+                                if (url != null) {
+                                    urlHandled = true
+                                    SwingUtilities.invokeLater {
+                                        if (JBCefApp.isSupported()) {
+                                            showJcefLoginDialog(url, proc, statusLabel, loginButton, cancelButton)
+                                        } else {
+                                            openBrowser(url)
+                                            statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                readerThread.isDaemon = true
+                readerThread.start()
 
-                // URL을 못 찾았을 때 — claude가 직접 브라우저를 열었을 가능성
-                if (!browserOpened) {
+                val exitCode = runCatching {
+                    proc.waitFor(3, TimeUnit.MINUTES); proc.exitValue()
+                }.getOrDefault(-1)
+                loginProcess = null
+                readerThread.join(2_000)
+
+                // JCEF 모드에서는 다이얼로그가 완료를 처리하므로 여기서는 팝업만 닫음
+                SwingUtilities.invokeLater { loginDialog?.dispose(); loginDialog = null }
+
+                if (!urlHandled) {
+                    // URL 파싱 실패 — claude가 자체적으로 브라우저를 열었을 수 있음
+                    val output = synchronized(sb) { sb.toString() }
+                    val finalStatus = when {
+                        exitCode == 0 -> "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
+                        else          -> "⚠️ 인증 URL을 찾지 못했습니다 (코드: $exitCode). 터미널에서 `claude /login`을 실행해주세요.\n출력: $output"
+                    }
                     SwingUtilities.invokeLater {
-                        statusLabel.text = "🌐 브라우저가 열렸을 수 있습니다. 로그인을 완료해주세요..."
+                        statusLabel.text = finalStatus
+                        loginButton.isEnabled = true
+                        cancelButton.isVisible = false
+                    }
+                } else if (!JBCefApp.isSupported()) {
+                    // 시스템 브라우저 fallback 모드에서 프로세스 완료 처리
+                    val output = synchronized(sb) { sb.toString() }
+                    val finalStatus = when {
+                        exitCode == 0 -> "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
+                        output.contains("error", ignoreCase = true) -> "❌ 로그인 실패. 다시 시도해주세요."
+                        exitCode == -1 -> "⚠️ 로그인이 취소되었습니다."
+                        else -> "⚠️ 종료 코드: $exitCode"
+                    }
+                    SwingUtilities.invokeLater {
+                        statusLabel.text = finalStatus
+                        loginButton.isEnabled = true
+                        cancelButton.isVisible = false
                     }
                 }
-
-                val exitCode = runCatching { proc.waitFor(3, TimeUnit.MINUTES); proc.exitValue() }.getOrDefault(-1)
-                loginProcess = null
-
-                val output = sb.toString()
-                val finalStatus = when {
-                    exitCode == 0 ->
-                        "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
-                    output.contains("Not logged in", ignoreCase = true) ||
-                    output.contains("error", ignoreCase = true) ->
-                        "❌ 로그인에 실패했습니다. 다시 시도해주세요."
-                    exitCode == -1 ->
-                        "⚠️ 로그인이 취소되었습니다."
-                    else ->
-                        "⚠️ 로그인 과정이 종료되었습니다 (코드: $exitCode)"
-                }
-
-                SwingUtilities.invokeLater {
-                    statusLabel.text = finalStatus
-                    loginButton.isEnabled = true
-                    cancelButton.isVisible = false
-                }
+                // JCEF 모드에서는 showJcefLoginDialog 내 windowClosed에서 처리
             } catch (e: Exception) {
                 loginProcess = null
                 SwingUtilities.invokeLater {
@@ -272,6 +299,72 @@ class NikuSettingsConfigurable : Configurable {
                 }
             }
         }.apply { isDaemon = true; name = "niku-login" }.start()
+    }
+
+    /**
+     * IDE 내장 Chromium(JCEF) 팝업으로 OAuth 로그인 창을 표시한다.
+     * claude /login 의 로컬 콜백 서버가 인증을 받으면 proc이 종료되고,
+     * windowClosed 이벤트에서 상태를 업데이트한다.
+     */
+    private fun showJcefLoginDialog(
+        url: String,
+        proc: Process,
+        statusLabel: JBLabel,
+        loginButton: JButton,
+        cancelButton: JButton,
+    ) {
+        val browser = JBCefBrowser(url)
+
+        val dialog = JDialog(
+            SwingUtilities.getWindowAncestor(panel),
+            "Claude 로그인",
+            Dialog.ModalityType.MODELESS,
+        )
+        dialog.contentPane.add(browser.component, BorderLayout.CENTER)
+        dialog.setSize(960, 700)
+        dialog.setLocationRelativeTo(SwingUtilities.getWindowAncestor(panel))
+
+        dialog.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent) {
+                // 사용자가 직접 닫거나 취소한 경우
+                proc.destroyForcibly()
+                loginProcess = null
+                loginDialog  = null
+                SwingUtilities.invokeLater {
+                    statusLabel.text = "⚠️ 로그인 창을 닫았습니다. 다시 시도하려면 버튼을 클릭해주세요."
+                    loginButton.isEnabled  = true
+                    cancelButton.isVisible = false
+                }
+            }
+            override fun windowClosed(e: WindowEvent) = windowClosing(e)
+        })
+
+        loginDialog = dialog
+
+        // 별도 스레드에서 proc 종료를 감지해 다이얼로그를 자동으로 닫음
+        Thread {
+            val exitCode = runCatching {
+                proc.waitFor(3, TimeUnit.MINUTES); proc.exitValue()
+            }.getOrDefault(-1)
+
+            val finalStatus = when (exitCode) {
+                0    -> "✅ 로그인 완료! 이제 분석을 실행할 수 있습니다."
+                -1   -> "⚠️ 로그인이 취소되었습니다."
+                else -> "❌ 로그인 실패 (코드: $exitCode). 다시 시도해주세요."
+            }
+            SwingUtilities.invokeLater {
+                // windowClosing이 중복 실행되지 않도록 리스너 제거 후 dispose
+                dialog.windowListeners.forEach { dialog.removeWindowListener(it) }
+                dialog.dispose()
+                loginDialog  = null
+                loginProcess = null
+                statusLabel.text      = finalStatus
+                loginButton.isEnabled  = true
+                cancelButton.isVisible = false
+            }
+        }.apply { isDaemon = true; name = "niku-login-watcher" }.start()
+
+        dialog.isVisible = true
     }
 
     // ── 로그인 상태 확인 ─────────────────────────────────────────────
