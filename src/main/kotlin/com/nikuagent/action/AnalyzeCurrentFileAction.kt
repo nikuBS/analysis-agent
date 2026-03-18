@@ -102,9 +102,16 @@ class AnalyzeCurrentFileAction : AnAction() {
             }
 
             override fun onThrowable(error: Throwable) {
-                panel.showResult(
-                    "<html><body style='color:red;padding:12px;'>오류: ${error.message}</body></html>"
-                )
+                val msg = error.message ?: ""
+                if (msg.contains("로그인이 필요합니다") || msg.contains("Not logged in", ignoreCase = true)) {
+                    panel.showLoginRequired {
+                        runAnalysis(project, panel, context, customPrompt)
+                    }
+                } else {
+                    panel.showResult(
+                        "<html><body style='color:red;padding:12px;'>오류: $msg</body></html>"
+                    )
+                }
             }
         })
     }

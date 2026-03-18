@@ -4,7 +4,9 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.nikuagent.context.FileContext
+import com.nikuagent.service.CliLlmClient
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Cursor
 import java.awt.FlowLayout
 import java.awt.Font
@@ -14,6 +16,7 @@ import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
 import javax.swing.JButton
 import javax.swing.JEditorPane
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.SwingUtilities
@@ -22,10 +25,12 @@ import javax.swing.SwingUtilities
  * Niku Agent Tool Window의 메인 패널.
  *
  * 상태 전환:
- * - 초기:    안내 메시지 (showWelcome)
- * - 옵션:    분석 유형 선택 + 커스텀 프롬프트 입력 (showOptions)
- * - 로딩:    분석 진행 중 (showLoading)
- * - 결과:    HTML 분석 결과 (showResult)
+ * - 초기:       안내 메시지 (showWelcome)
+ * - 옵션:       분석 유형 선택 + 커스텀 프롬프트 입력 (showOptions)
+ * - 로딩:       분석 진행 중 (showLoading)
+ * - 스트리밍:   실시간 응답 표시 (showStreaming)
+ * - 결과:       HTML 분석 결과 (showResult)
+ * - 로그인:     Claude CLI 미로그인 안내 (showLoginRequired)
  */
 class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
@@ -139,6 +144,17 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         }
     }
 
+    /**
+     * Claude CLI 미로그인 상태일 때 로그인 안내 패널을 표시한다.
+     *
+     * @param onRetry  로그인 후 사용자가 "다시 분석" 버튼을 클릭했을 때 호출되는 콜백
+     */
+    fun showLoginRequired(onRetry: (() -> Unit)? = null) {
+        SwingUtilities.invokeLater {
+            swapContent(buildLoginPanel(onRetry))
+        }
+    }
+
     // --- private helpers ---
 
     private fun swapContent(newContent: java.awt.Component) {
@@ -228,6 +244,79 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         }
         val btnPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(analyzeBtn) }
         root.add(btnPanel)
+
+        return root
+    }
+
+    private fun buildLoginPanel(onRetry: (() -> Unit)?): JPanel {
+        val root = JPanel()
+        root.layout = BoxLayout(root, BoxLayout.Y_AXIS)
+        root.border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
+
+        // 아이콘 + 제목
+        val titleLabel = JLabel("<html><div style='text-align:center;'>" +
+            "<span style='font-size:36px;'>🔐</span></div></html>").apply {
+            alignmentX = CENTER_ALIGNMENT
+        }
+        val headingLabel = JBLabel("로그인이 필요합니다").apply {
+            font = Font(font.name, Font.BOLD, 16)
+            alignmentX = CENTER_ALIGNMENT
+        }
+        val descLabel = JBLabel("<html><div style='text-align:center;color:gray;'>" +
+            "Claude CLI가 로그인되어 있지 않습니다.<br/>" +
+            "아래 버튼으로 터미널에서 로그인 후<br/>" +
+            "다시 분석을 실행해주세요." +
+            "</div></html>").apply {
+            alignmentX = CENTER_ALIGNMENT
+        }
+
+        root.add(Box.createVerticalStrut(16))
+        root.add(titleLabel)
+        root.add(Box.createVerticalStrut(12))
+        root.add(headingLabel)
+        root.add(Box.createVerticalStrut(8))
+        root.add(descLabel)
+        root.add(Box.createVerticalStrut(20))
+
+        // 로그인 버튼
+        val loginBtn = JButton("터미널에서 로그인  (claude /login)").apply {
+            font = Font(font.name, Font.BOLD, 13)
+            alignmentX = CENTER_ALIGNMENT
+            addActionListener {
+                val binaryPath = CliLlmClient.findBinary() ?: "claude"
+                try {
+                    Runtime.getRuntime().exec(arrayOf(
+                        "osascript",
+                        "-e", "tell application \"Terminal\" to activate",
+                        "-e", "tell application \"Terminal\" to do script \"$binaryPath /login\""
+                    ))
+                } catch (_: Exception) { }
+            }
+        }
+        val loginBtnPanel = JPanel(FlowLayout(FlowLayout.CENTER)).apply { add(loginBtn) }
+        root.add(loginBtnPanel)
+
+        // 다시 분석 버튼 (onRetry가 있을 때만 표시)
+        if (onRetry != null) {
+            root.add(Box.createVerticalStrut(8))
+            val retryBtn = JButton("↩  로그인 완료 — 다시 분석하기").apply {
+                alignmentX = CENTER_ALIGNMENT
+                addActionListener { onRetry() }
+            }
+            val retryBtnPanel = JPanel(FlowLayout(FlowLayout.CENTER)).apply { add(retryBtn) }
+            root.add(retryBtnPanel)
+        }
+
+        root.add(Box.createVerticalStrut(16))
+
+        // 설치 안내 링크 텍스트
+        val hintLabel = JBLabel("<html><div style='text-align:center;color:gray;font-size:11px;'>" +
+            "Claude CLI가 없다면 <b>Settings → Tools → Niku Agent</b>에서<br/>" +
+            "자동 감지 또는 경로를 설정해주세요." +
+            "</div></html>").apply {
+            alignmentX = CENTER_ALIGNMENT
+        }
+        root.add(hintLabel)
 
         return root
     }
