@@ -156,6 +156,11 @@ class CliLlmClient(
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
             "${System.getProperty("user.home")}/.local/bin/claude",
+            // macOS Claude Code 앱 설치 경로
+            "${System.getProperty("user.home")}/Library/Application Support/Claude/claude-code-vm/2.1.78/claude",
+            "${System.getProperty("user.home")}/Library/Application Support/Claude/claude-code/2.1.78/claude",
+            "${System.getProperty("user.home")}/Library/Application Support/Claude/claude-code-vm/2.1.72/claude",
+            "${System.getProperty("user.home")}/Library/Application Support/Claude/claude-code/2.1.72/claude",
             "${System.getProperty("user.home")}/.npm/bin/claude",
             "${System.getProperty("user.home")}/.nvm/bin/claude",
         )
