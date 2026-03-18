@@ -10,6 +10,7 @@ import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.SwingUtilities
 
 /**
  * Settings → Tools → Niku Agent 설정 화면.
@@ -63,9 +64,50 @@ class NikuSettingsConfigurable : Configurable {
             }
         }
 
+        val loginStatusLabel = JBLabel(" ")
+
+        val loginButton = JButton("터미널에서 로그인 (claude /login)").apply {
+            addActionListener {
+                val path = binaryPathField!!.text.trim()
+                    .ifBlank { CliLlmClient.findBinary() ?: "claude" }
+                try {
+                    Runtime.getRuntime().exec(arrayOf(
+                        "osascript", "-e",
+                        "tell application \"Terminal\" to activate",
+                        "-e",
+                        "tell application \"Terminal\" to do script \"$path /login\""
+                    ))
+                    loginStatusLabel.text = "✅ 터미널을 열었습니다. 로그인 후 다시 분석을 실행해주세요."
+                } catch (e: Exception) {
+                    loginStatusLabel.text = "❌ 터미널 실행 실패: 터미널에서 직접 `$path /login`을 실행해주세요."
+                }
+            }
+        }
+
+        val checkLoginButton = JButton("로그인 상태 확인").apply {
+            addActionListener {
+                val path = binaryPathField!!.text.trim()
+                    .ifBlank { CliLlmClient.findBinary() ?: "" }
+                if (path.isBlank()) {
+                    loginStatusLabel.text = "❌ CLI 경로를 먼저 설정해주세요."
+                    return@addActionListener
+                }
+                loginStatusLabel.text = "⏳ 확인 중..."
+                Thread {
+                    val status = checkLoginStatus(path)
+                    SwingUtilities.invokeLater { loginStatusLabel.text = status }
+                }.apply { isDaemon = true }.start()
+            }
+        }
+
         val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             add(detectButton)
             add(checkButton)
+        }
+
+        val loginButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            add(loginButton)
+            add(checkLoginButton)
         }
 
         panel = FormBuilder.createFormBuilder()
@@ -77,6 +119,10 @@ class NikuSettingsConfigurable : Configurable {
             .addLabeledComponent(JBLabel("CLI 경로:"), binaryPathField!!, true)
             .addComponent(buttonPanel)
             .addComponent(statusLabel!!)
+            .addSeparator()
+            .addComponent(JBLabel("<html><b>로그인</b></html>"))
+            .addComponent(loginButtonPanel)
+            .addComponent(loginStatusLabel)
             .addSeparator()
             .addLabeledComponent(JBLabel("모델:"), modelCombo!!, true)
             .addComponent(JBLabel("<html><span style='color:gray;font-size:11px;'>" +
@@ -116,6 +162,25 @@ class NikuSettingsConfigurable : Configurable {
         binaryPathField = null
         modelCombo = null
         statusLabel = null
+    }
+
+    private fun checkLoginStatus(binaryPath: String): String {
+        return try {
+            val proc = ProcessBuilder(binaryPath, "--print", "ping")
+                .redirectErrorStream(true)
+                .start()
+            proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+            val output = proc.inputStream.bufferedReader().readText().trim()
+            when {
+                output.contains("Not logged in", ignoreCase = true) ||
+                output.contains("Please run /login", ignoreCase = true) ->
+                    "❌ 로그인되어 있지 않습니다. '터미널에서 로그인' 버튼을 클릭해주세요."
+                output.isNotBlank() -> "✅ 로그인 상태 정상"
+                else -> "⚠️ 상태를 확인할 수 없습니다."
+            }
+        } catch (e: Exception) {
+            "❌ 확인 실패: ${e.message}"
+        }
     }
 
     companion object {

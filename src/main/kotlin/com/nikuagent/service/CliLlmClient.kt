@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Claude Code CLI(`claude`)를 subprocess로 실행하는 LLM 클라이언트.
  *
- * API 키 없이 `claude --print "prompt"` 형태로 실행한다.
+ * 프롬프트는 stdin으로 전달한다 (`claude --print`는 인수 없이 실행 후 stdin에서 읽음).
  * claude CLI가 로그인된 상태여야 동작한다.
  *
  * @param binaryPath  claude 실행 파일 경로 (예: /usr/local/bin/claude)
@@ -17,10 +17,6 @@ class CliLlmClient(
     private val model: String? = null,
 ) : LlmClient {
 
-    /**
-     * @param onChunk  null이 아니면 응답을 청크 단위로 스트리밍한다.
-     *                 파라미터로 지금까지 누적된 전체 텍스트를 전달한다.
-     */
     override fun complete(prompt: String, onChunk: ((String) -> Unit)?): String {
         val cmd = buildList {
             add(binaryPath)
@@ -29,7 +25,7 @@ class CliLlmClient(
                 add("--model")
                 add(model)
             }
-            add(prompt)
+            // 프롬프트는 인수가 아닌 stdin으로 전달 (긴 프롬프트 안정성 + 특수문자 이슈 방지)
         }
 
         val process = try {
@@ -44,6 +40,14 @@ class CliLlmClient(
             )
         }
 
+        // 프롬프트를 stdin으로 write 후 즉시 close (EOF 전송)
+        try {
+            process.outputStream.bufferedWriter().use { it.write(prompt) }
+        } catch (e: Exception) {
+            process.destroyForcibly()
+            throw LlmException("Claude CLI stdin 전송 실패: ${e.message}", e)
+        }
+
         return if (onChunk != null) {
             readStreaming(process, onChunk)
         } else {
@@ -51,50 +55,97 @@ class CliLlmClient(
         }
     }
 
-    /** 스트리밍: stdout을 청크 단위로 읽으며 onChunk 호출 */
+    /**
+     * 스트리밍 모드: stdout을 읽으면서 onChunk 콜백 호출.
+     * watchdog 스레드로 TIMEOUT_SECONDS 후 강제 종료 보장.
+     */
     private fun readStreaming(process: Process, onChunk: (String) -> Unit): String {
         val sb = StringBuilder()
-        val reader = process.inputStream.bufferedReader()
-        val buffer = CharArray(256)
-        var charsRead: Int
 
-        while (reader.read(buffer).also { charsRead = it } != -1) {
-            sb.append(buffer, 0, charsRead)
-            onChunk(sb.toString())
+        // stdout 읽기 스레드
+        val readerThread = Thread {
+            try {
+                val reader = process.inputStream.bufferedReader()
+                val buffer = CharArray(512)
+                var charsRead: Int
+                while (reader.read(buffer).also { charsRead = it } != -1) {
+                    synchronized(sb) { sb.append(buffer, 0, charsRead) }
+                    onChunk(synchronized(sb) { sb.toString() })
+                }
+            } catch (_: Exception) { }
         }
+        readerThread.isDaemon = true
+        readerThread.start()
 
         val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        readerThread.join(2_000)
+
         if (!finished) {
             process.destroyForcibly()
-            throw LlmException("Claude CLI 응답 시간 초과 (${TIMEOUT_SECONDS}초)")
+            val partial = synchronized(sb) { sb.toString().trim() }
+            if (partial.isNotBlank()) {
+                onChunk("$partial\n\n⚠️ 응답 시간 초과로 부분 결과만 표시됩니다.")
+                return partial
+            }
+            throw LlmException(
+                "Claude CLI 응답 시간 초과 (${TIMEOUT_SECONDS}초)\n" +
+                "› 네트워크 상태나 claude 로그인 여부를 확인해주세요."
+            )
         }
 
-        val exitCode = process.exitValue()
-        // exit 1은 CLI 경고일 수 있으므로, 응답이 있으면 성공으로 처리
-        if (exitCode != 0 && sb.isBlank()) {
-            throw LlmException("Claude CLI 오류 (exit $exitCode): 응답이 비어있습니다.")
+        val output = synchronized(sb) { sb.toString().trim() }
+        checkNotLoggedIn(output)
+
+        val exitCode = runCatching { process.exitValue() }.getOrDefault(-1)
+        if (exitCode != 0 && output.isBlank()) {
+            throw LlmException("Claude CLI 오류 (exit $exitCode). Settings에서 버전 확인 버튼으로 상태를 확인해주세요.")
         }
 
-        return sb.toString().trim()
+        return output.ifBlank { throw LlmException("Claude CLI 응답이 비어있습니다.") }
     }
 
-    /** 블로킹: 전체 응답을 한 번에 읽음 */
+    /** 블로킹 모드: 전체 응답을 한 번에 읽음 */
     private fun readBlocking(process: Process): String {
-        val output = process.inputStream.bufferedReader().readText()
+        val sb = StringBuilder()
+
+        val readerThread = Thread {
+            try {
+                sb.append(process.inputStream.bufferedReader().readText())
+            } catch (_: Exception) { }
+        }
+        readerThread.isDaemon = true
+        readerThread.start()
+
         val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        readerThread.join(2_000)
 
         if (!finished) {
             process.destroyForcibly()
-            throw LlmException("Claude CLI 응답 시간 초과 (${TIMEOUT_SECONDS}초)")
+            throw LlmException(
+                "Claude CLI 응답 시간 초과 (${TIMEOUT_SECONDS}초)\n" +
+                "› 네트워크 상태나 claude 로그인 여부를 확인해주세요."
+            )
         }
 
-        val exitCode = process.exitValue()
+        val output = sb.toString().trim()
+        val exitCode = runCatching { process.exitValue() }.getOrDefault(-1)
         if (exitCode != 0) {
-            throw LlmException("Claude CLI 오류 (exit $exitCode):\n$output")
+            throw LlmException("Claude CLI 오류 (exit $exitCode):\n${output.take(300)}")
         }
 
-        return output.trim().ifBlank {
-            throw LlmException("Claude CLI 응답이 비어있습니다.")
+        return output.ifBlank { throw LlmException("Claude CLI 응답이 비어있습니다.") }
+    }
+
+    private fun checkNotLoggedIn(output: String) {
+        if (output.contains("Not logged in", ignoreCase = true) ||
+            output.contains("Please run /login", ignoreCase = true) ||
+            output.contains("not authenticated", ignoreCase = true)
+        ) {
+            throw LlmException(
+                "Claude CLI 로그인이 필요합니다.\n" +
+                "› Settings → Tools → Niku Agent에서 '터미널에서 로그인' 버튼을 클릭하거나\n" +
+                "› 터미널에서 `claude /login`을 실행해주세요."
+            )
         }
     }
 
