@@ -136,15 +136,28 @@ class CliLlmClient(
         return output.ifBlank { throw LlmException("Claude CLI 응답이 비어있습니다.") }
     }
 
+    /**
+     * 출력 내용으로 미로그인 여부를 1차 확인하고,
+     * ~/.claude.json 파일로 2차 확인한다.
+     * 둘 중 하나라도 미로그인이면 LlmException 을 던진다.
+     */
     private fun checkNotLoggedIn(output: String) {
-        if (output.contains("Not logged in", ignoreCase = true) ||
+        val outputSignal = output.contains("Not logged in", ignoreCase = true) ||
             output.contains("Please run /login", ignoreCase = true) ||
             output.contains("not authenticated", ignoreCase = true)
-        ) {
+
+        val fileSignal = runCatching {
+            val f = File(System.getProperty("user.home"), ".claude.json")
+            !f.exists() || run {
+                val c = f.readText()
+                !c.contains("\"oauthAccount\"") || !c.contains("\"accountUuid\"")
+            }
+        }.getOrDefault(false)
+
+        if (outputSignal || fileSignal) {
             throw LlmException(
-                "Claude CLI 로그인이 필요합니다.\n" +
-                "› Settings → Tools → Niku Agent에서 '터미널에서 로그인' 버튼을 클릭하거나\n" +
-                "› 터미널에서 `claude /login`을 실행해주세요."
+                "로그인이 필요합니다.\n" +
+                "› Settings → Tools → Niku Agent → '🔑 로그인' 버튼을 클릭해주세요."
             )
         }
     }
