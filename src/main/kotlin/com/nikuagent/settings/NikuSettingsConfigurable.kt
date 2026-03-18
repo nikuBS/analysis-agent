@@ -164,22 +164,70 @@ class NikuSettingsConfigurable : Configurable {
         statusLabel = null
     }
 
+    /**
+     * claude --print 으로 짧은 프롬프트를 보내고,
+     * "Not logged in" 문자열이 나오면 즉시 프로세스를 종료한다.
+     * 로그인된 경우 AI 응답이 오기 시작하면 바로 ✅ 처리하고 종료한다.
+     * 전체 타임아웃은 8초.
+     */
     private fun checkLoginStatus(binaryPath: String): String {
+        var proc: Process? = null
         return try {
-            val proc = ProcessBuilder(binaryPath, "--print", "ping")
+            proc = ProcessBuilder(binaryPath, "--print")
                 .redirectErrorStream(true)
                 .start()
-            proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-            val output = proc.inputStream.bufferedReader().readText().trim()
-            when {
-                output.contains("Not logged in", ignoreCase = true) ||
-                output.contains("Please run /login", ignoreCase = true) ->
+
+            // stdin으로 프롬프트 전달 후 즉시 닫기
+            proc.outputStream.bufferedWriter().use { it.write("1+1=?") }
+
+            val sb = StringBuilder()
+            var earlyResult: String? = null
+
+            val readerThread = Thread {
+                try {
+                    proc.inputStream.bufferedReader().use { reader ->
+                        val buf = CharArray(512)
+                        while (true) {
+                            val n = reader.read(buf)
+                            if (n < 0) break
+                            synchronized(sb) { sb.append(buf, 0, n) }
+                            val current = synchronized(sb) { sb.toString() }
+                            when {
+                                current.contains("Not logged in", ignoreCase = true) ||
+                                current.contains("Please run /login", ignoreCase = true) -> {
+                                    earlyResult = "❌ 로그인되어 있지 않습니다. '터미널에서 로그인' 버튼을 클릭해주세요."
+                                    proc.destroyForcibly()
+                                    break
+                                }
+                                current.isNotBlank() -> {
+                                    // 에러 없이 응답이 오기 시작했으면 로그인 OK
+                                    earlyResult = "✅ 로그인 상태 정상"
+                                    proc.destroyForcibly()
+                                    break
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) { /* 프로세스 강제 종료 후 예외는 무시 */ }
+            }
+            readerThread.isDaemon = true
+            readerThread.start()
+
+            // 최대 8초 대기
+            proc.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
+            proc.destroyForcibly()
+            readerThread.join(2_000)
+
+            earlyResult ?: when {
+                synchronized(sb) { sb.toString() }.contains("Not logged in", ignoreCase = true) ->
                     "❌ 로그인되어 있지 않습니다. '터미널에서 로그인' 버튼을 클릭해주세요."
-                output.isNotBlank() -> "✅ 로그인 상태 정상"
-                else -> "⚠️ 상태를 확인할 수 없습니다."
+                synchronized(sb) { sb.isNotEmpty() } -> "✅ 로그인 상태 정상"
+                else -> "⚠️ 응답 없음 — CLI 경로를 확인해주세요."
             }
         } catch (e: Exception) {
             "❌ 확인 실패: ${e.message}"
+        } finally {
+            runCatching { proc?.destroyForcibly() }
         }
     }
 
