@@ -5,9 +5,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.nikuagent.service.CliLlmClient
-import java.awt.Desktop
 import java.awt.FlowLayout
-import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.swing.JButton
 import javax.swing.JComboBox
@@ -210,35 +208,37 @@ class NikuSettingsConfigurable : Configurable {
                 loginProcess = proc
 
                 val sb = StringBuilder()
-                val urlRegex = Regex("""https?://\S+""")
+                // ANSI 이스케이프 코드 제거용 (ESC[...m 등)
+                val ansiRegex = Regex("""\u001B\[[0-9;]*[A-Za-z]""")
+                val urlRegex  = Regex("""https://\S{10,}""")
                 var browserOpened = false
 
-                // stdout을 읽으며 URL 파싱
+                // stdout + stderr(merged) 읽으며 URL 파싱
                 proc.inputStream.bufferedReader().use { reader ->
                     val buf = CharArray(256)
                     while (true) {
                         val n = reader.read(buf)
                         if (n < 0) break
-                        val chunk = String(buf, 0, n)
-                        sb.append(chunk)
+                        sb.append(buf, 0, n)
 
-                        // 첫 번째 https URL을 찾아 브라우저로 열기
                         if (!browserOpened) {
-                            val url = urlRegex.find(sb.toString())?.value
+                            val clean = ansiRegex.replace(sb.toString(), "")
+                            val url   = urlRegex.find(clean)?.value?.trimEnd(')', '.', ',')
                             if (url != null) {
                                 browserOpened = true
-                                try {
-                                    Desktop.getDesktop().browse(URI(url))
-                                    SwingUtilities.invokeLater {
-                                        statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
-                                    }
-                                } catch (_: Exception) {
-                                    SwingUtilities.invokeLater {
-                                        statusLabel.text = "🌐 브라우저 열기 실패. 아래 URL을 직접 여세요: $url"
-                                    }
+                                openBrowser(url)
+                                SwingUtilities.invokeLater {
+                                    statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
                                 }
                             }
                         }
+                    }
+                }
+
+                // URL을 못 찾았을 때 — claude가 직접 브라우저를 열었을 가능성
+                if (!browserOpened) {
+                    SwingUtilities.invokeLater {
+                        statusLabel.text = "🌐 브라우저가 열렸을 수 있습니다. 로그인을 완료해주세요..."
                     }
                 }
 
@@ -335,6 +335,20 @@ class NikuSettingsConfigurable : Configurable {
         } finally {
             runCatching { proc?.destroyForcibly() }
         }
+    }
+
+    /**
+     * macOS: `open URL`, Linux: `xdg-open URL` 으로 시스템 기본 브라우저를 연다.
+     * Desktop API 대신 OS 커맨드를 직접 사용해 WebStorm JVM 환경에서도 안정적으로 동작한다.
+     */
+    private fun openBrowser(url: String) {
+        val os = System.getProperty("os.name", "").lowercase()
+        val cmd = when {
+            os.contains("mac")  -> arrayOf("open", url)
+            os.contains("win")  -> arrayOf("cmd", "/c", "start", url)
+            else                -> arrayOf("xdg-open", url)
+        }
+        runCatching { Runtime.getRuntime().exec(cmd) }
     }
 
     companion object {

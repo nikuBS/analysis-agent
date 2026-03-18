@@ -8,10 +8,8 @@ import com.nikuagent.service.CliLlmClient
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Cursor
-import java.awt.Desktop
 import java.awt.FlowLayout
 import java.awt.Font
-import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.swing.BorderFactory
 import javax.swing.Box
@@ -357,7 +355,8 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
                 activeLoginProcess = proc
 
                 val sb = StringBuilder()
-                val urlRegex = Regex("""https?://\S+""")
+                val ansiRegex = Regex("""\u001B\[[0-9;]*[A-Za-z]""")
+                val urlRegex  = Regex("""https://\S{10,}""")
                 var browserOpened = false
 
                 proc.inputStream.bufferedReader().use { reader ->
@@ -367,21 +366,22 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
                         if (n < 0) break
                         sb.append(buf, 0, n)
                         if (!browserOpened) {
-                            val url = urlRegex.find(sb.toString())?.value
+                            val clean = ansiRegex.replace(sb.toString(), "")
+                            val url   = urlRegex.find(clean)?.value?.trimEnd(')', '.', ',')
                             if (url != null) {
                                 browserOpened = true
-                                try {
-                                    Desktop.getDesktop().browse(URI(url))
-                                    SwingUtilities.invokeLater {
-                                        statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
-                                    }
-                                } catch (_: Exception) {
-                                    SwingUtilities.invokeLater {
-                                        statusLabel.text = "🌐 브라우저 열기 실패 — URL: $url"
-                                    }
+                                openBrowserOs(url)
+                                SwingUtilities.invokeLater {
+                                    statusLabel.text = "🌐 브라우저에서 로그인을 완료해주세요..."
                                 }
                             }
                         }
+                    }
+                }
+
+                if (!browserOpened) {
+                    SwingUtilities.invokeLater {
+                        statusLabel.text = "🌐 브라우저가 열렸을 수 있습니다. 로그인을 완료해주세요..."
                     }
                 }
 
@@ -409,6 +409,17 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
                 }
             }
         }.apply { isDaemon = true; name = "niku-login-tw" }.start()
+    }
+
+    /** macOS: `open URL` / Linux: `xdg-open` / Windows: `start` 으로 시스템 브라우저를 연다. */
+    private fun openBrowserOs(url: String) {
+        val os  = System.getProperty("os.name", "").lowercase()
+        val cmd = when {
+            os.contains("mac") -> arrayOf("open", url)
+            os.contains("win") -> arrayOf("cmd", "/c", "start", url)
+            else               -> arrayOf("xdg-open", url)
+        }
+        runCatching { Runtime.getRuntime().exec(cmd) }
     }
 
     private fun buildContextDescription(context: FileContext): String {
