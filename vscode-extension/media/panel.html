@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; img-src data: https:;" />
+        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <title>Niku Agent</title>
   <style>
     /* ── 다크 팔레트 (WebStorm 플러그인과 동일) ── */
@@ -270,36 +270,6 @@
     .result-body .ok   { color: #6a9955; }
     .result-body .warn { color: #ce9178; }
 
-    /* 표 */
-    .result-body table {
-      border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px;
-    }
-    .result-body th {
-      padding: 6px 10px; background: #2d2d2d; color: #9cdcfe;
-      border: 1px solid #3c3c3c; text-align: left; font-weight: bold;
-    }
-    .result-body td {
-      padding: 5px 10px; border: 1px solid #3c3c3c; color: #cccccc;
-    }
-    .result-body tr:nth-child(even) td { background: #252526; }
-
-    /* Mermaid 다이어그램 컨테이너 */
-    .mermaid-wrap {
-      background: #0d1117; border: 1px solid #569cd6; border-radius: 4px;
-      padding: 14px; margin: 10px 0; overflow-x: auto;
-    }
-    .mermaid-label {
-      color: #569cd6; font-size: 11px; font-weight: bold; margin-bottom: 10px;
-    }
-    .mermaid svg { max-width: 100%; }
-    /* mermaid 텍스트 컬러 오버라이드 (다크 테마) */
-    .mermaid .label, .mermaid text { fill: #cccccc !important; }
-    .mermaid .edgePath .path { stroke: #569cd6 !important; }
-    .mermaid .node rect, .mermaid .node circle,
-    .mermaid .node ellipse, .mermaid .node polygon {
-      fill: #1e3a5f !important; stroke: #569cd6 !important;
-    }
-
     /* ── 로그인 / 에러 패널 ── */
     .info-panel {
       display: flex;
@@ -548,13 +518,8 @@
           // 탭 제목에서 ⏳ 제거
           const t = tabs.find(t => t.id === msg.tabId);
           if (t) t.title = t.title.replace('⏳ ', '');
-          if (msg.tabId === activeId) {
-            render();
-            // Mermaid 렌더링 (DOM 반영 후 실행)
-            setTimeout(() => initMermaid(), 150);
-          } else {
-            renderTabBar();
-          }
+          if (msg.tabId === activeId) render();
+          else renderTabBar();
           break;
         }
 
@@ -595,20 +560,9 @@
     function mdToHtml(md) {
       let h = escHtml(md);
 
-      // Mermaid 다이어그램 — 일반 코드 블록보다 먼저
-      let mermaidCount = 0;
-      h = h.replace(/```mermaid\n([\s\S]*?)```/gm, (_, code) => {
-        const id = 'mermaid-' + (mermaidCount++);
-        return `<div class="mermaid-wrap"><div class="mermaid-label">📊 흐름 다이어그램</div>` +
-               `<div class="mermaid" id="${id}">${code.trim()}</div></div>`;
-      });
-
       // 코드 블록 (``` ... ```)
       h = h.replace(/```[\w]*\n([\s\S]*?)```/gm, (_, c) =>
         '<pre><code>' + c.trimEnd() + '</code></pre>');
-
-      // 마크다운 표 — H2/H3 이전에 처리
-      h = buildTables(h);
 
       // H2 / H3
       h = h.replace(/^## (.+)$/gm, (_, t) => '<h2>' + t + '</h2>');
@@ -639,46 +593,6 @@
       return h;
     }
 
-    // ── 마크다운 표 → HTML table ──────────────────────────────────
-    function buildTables(html) {
-      const lines = html.split('\n');
-      const out = [];
-      let i = 0;
-      while (i < lines.length) {
-        const line = lines[i];
-        const isSepNext = (i + 1 < lines.length) &&
-          /^\|[\s|:\-]+\|$/.test(lines[i + 1].trim());
-
-        if (line.trimStart().startsWith('|') && line.trimEnd().endsWith('|') && isSepNext) {
-          const headers = parseCells(line);
-          out.push('<table><thead><tr>');
-          headers.forEach(h => out.push(`<th>${h}</th>`));
-          out.push('</tr></thead><tbody>');
-          let j = i + 2;
-          while (j < lines.length &&
-                 lines[j].trimStart().startsWith('|') &&
-                 lines[j].trimEnd().endsWith('|')) {
-            const cells = parseCells(lines[j]);
-            out.push('<tr>');
-            cells.forEach(c => out.push(`<td>${c}</td>`));
-            out.push('</tr>');
-            j++;
-          }
-          out.push('</tbody></table>');
-          i = j;
-        } else {
-          out.push(line);
-          i++;
-        }
-      }
-      return out.join('\n');
-    }
-
-    function parseCells(line) {
-      return line.trim().replace(/^\|/, '').replace(/\|$/, '')
-        .split('|').map(c => c.trim()).filter(c => c.length > 0);
-    }
-
     function buildLists(html) {
       const lines = html.split('\n');
       const out = [];
@@ -703,28 +617,6 @@
       return out.join('\n');
     }
 
-    // ── Mermaid 초기화 ────────────────────────────────────────────
-    function initMermaid() {
-      if (typeof mermaid === 'undefined') return;
-      try {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: 'dark',
-          themeVariables: {
-            darkMode: true,
-            background: '#0d1117',
-            primaryColor: '#1e3a5f',
-            primaryTextColor: '#cccccc',
-            primaryBorderColor: '#569cd6',
-            lineColor: '#569cd6',
-            secondaryColor: '#252526',
-            tertiaryColor: '#2d2d2d',
-          },
-        });
-        mermaid.run({ querySelector: '.mermaid' });
-      } catch(e) { console.warn('Mermaid init failed', e); }
-    }
-
     // ── 유틸 ──────────────────────────────────────────────────────
     function escHtml(s) {
       if (!s) return '';
@@ -735,7 +627,5 @@
         .replace(/"/g, '&quot;');
     }
   </script>
-<!-- Mermaid.js: 다이어그램 렌더링 (오프라인 시 텍스트로 표시) -->
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </body>
 </html>

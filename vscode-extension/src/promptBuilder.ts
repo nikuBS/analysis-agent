@@ -2,50 +2,6 @@ import { FileContext } from './contextCollector';
 
 const MAX_CONTENT_LENGTH = 8_000;
 
-const SECTIONS = `## 2. 주요 파일 / 컴포넌트
-관련된 주요 컴포넌트나 파일을 아래 형식의 **마크다운 표**로 정리하세요.
-
-| 컴포넌트 / 파일 | 역할 |
-|----------------|------|
-| 예시.tsx | 예시 역할 |
-
-## 3. 화면 동작 흐름
-사용자 인터랙션부터 렌더링까지의 흐름을 단계별로 설명하세요.
-(예: 버튼 클릭 → 핸들러 호출 → 상태 변경 → 리렌더링)
-
-## 4. 상태 / 데이터 흐름
-useState, useReducer, Context, Redux 등의 상태 관리 흐름을 설명하세요.
-props 전달 구조도 포함하세요.
-
-## 5. API 연계
-fetch, axios, react-query, SWR 등 API 호출을 아래 형식의 **마크다운 표**로 정리하세요.
-없으면 "없음"으로 표기하세요.
-
-| 메서드 | 엔드포인트 | 파라미터 | 역할 |
-|--------|-----------|---------|------|
-| GET | /api/example | id | 예시 |
-
-## 6. 예외 / 리스크
-에러 처리, 엣지 케이스, 잠재적 버그 가능성을 나열하세요.
-
-## 7. 확인 필요 사항
-추가로 확인해야 할 파일이나 로직을 아래 형식의 **마크다운 표**로 정리하세요.
-
-| 확인 항목 | 위치 | 이유 |
-|----------|------|------|
-| 예시 | 파일명.tsx | 이유 |
-
-## 8. 흐름 다이어그램
-사용자 인터랙션부터 데이터 처리까지의 전체 흐름을 **Mermaid flowchart** 형식으로 표현하세요.
-반드시 아래 코드 블록 형식으로 작성하세요:
-
-\`\`\`mermaid
-flowchart TD
-  A[시작] --> B{조건 분기}
-  B -->|예| C[처리]
-  B -->|아니오| D[종료]
-\`\`\``;
-
 /** WebStorm 플러그인의 PromptBuilder 를 TypeScript 로 직접 포팅 */
 export const PromptBuilder = {
 
@@ -54,7 +10,9 @@ export const PromptBuilder = {
       ? selectedSection(context.selection)
       : fullFileSection(context.fullContent);
 
-    const importsSection = context.imports.length > 0 ? importsBlock(context.imports) : '';
+    const importsSection = context.imports.length > 0
+      ? importsBlock(context.imports)
+      : '';
 
     const focusInstruction = context.focusFunctionName
       ? `⚠️ 분석 집중 대상: \`${context.focusFunctionName}\` 함수(또는 변수/컴포넌트)에 집중하여 분석해주세요. 전체 파일 코드에서 해당 심볼의 정의와 호출 흐름을 추적하세요.\n`
@@ -76,7 +34,26 @@ ${analysisTarget}
 ## 1. 기능 요약
 이 코드가 어떤 역할을 하는지 2~3줄로 요약하세요.
 
-${SECTIONS}`;
+## 2. 주요 파일 / 컴포넌트
+관련된 주요 컴포넌트나 파일을 나열하고 각 역할을 설명하세요.
+
+## 3. 화면 동작 흐름
+사용자 인터랙션부터 렌더링까지의 흐름을 단계별로 설명하세요.
+(예: 버튼 클릭 → 핸들러 호출 → 상태 변경 → 리렌더링)
+
+## 4. 상태 / 데이터 흐름
+useState, useReducer, Context, Redux 등의 상태 관리 흐름을 설명하세요.
+props 전달 구조도 포함하세요.
+
+## 5. API 연계
+fetch, axios, react-query, SWR 등 API 호출 지점과 엔드포인트를 정리하세요.
+없으면 "없음"으로 표기하세요.
+
+## 6. 예외 / 리스크
+에러 처리, 엣지 케이스, 잠재적 버그 가능성을 나열하세요.
+
+## 7. 확인 필요 사항
+코드를 완전히 이해하기 위해 추가로 확인해야 할 파일이나 로직을 나열하세요.`;
   },
 
   buildCustom(context: FileContext, userPrompt: string): string {
@@ -84,7 +61,9 @@ ${SECTIONS}`;
       ? selectedSection(context.selection)
       : fullFileSection(context.fullContent);
 
-    const importsSection = context.imports.length > 0 ? importsBlock(context.imports) : '';
+    const importsSection = context.imports.length > 0
+      ? importsBlock(context.imports)
+      : '';
 
     const focusNote = context.focusFunctionName
       ? `특히 \`${context.focusFunctionName}\` 함수를 중심으로 답변해주세요.\n\n`
@@ -108,7 +87,24 @@ ${focusNote}---
 ## 1. 기능 요약
 이 코드가 어떤 역할을 하는지 2~3줄로 요약하세요.
 
-${SECTIONS}
+## 2. 주요 파일 / 컴포넌트
+관련된 주요 컴포넌트나 파일을 나열하고 각 역할을 설명하세요.
+
+## 3. 화면 동작 흐름
+사용자 인터랙션부터 렌더링까지의 흐름을 단계별로 설명하세요.
+
+## 4. 상태 / 데이터 흐름
+useState, useReducer, Context, Redux 등의 상태 관리 흐름을 설명하세요.
+
+## 5. API 연계
+fetch, axios, react-query, SWR 등 API 호출 지점과 엔드포인트를 정리하세요.
+없으면 "없음"으로 표기하세요.
+
+## 6. 예외 / 리스크
+에러 처리, 엣지 케이스, 잠재적 버그 가능성을 나열하세요.
+
+## 7. 확인 필요 사항
+코드를 완전히 이해하기 위해 추가로 확인해야 할 파일이나 로직을 나열하세요.
 
 ---
 
