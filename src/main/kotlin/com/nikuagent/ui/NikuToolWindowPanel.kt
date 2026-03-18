@@ -51,6 +51,9 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
         background = BG_PANEL
         foreground = FG
         isOpaque   = true
+        // 탭 스트립 색상 강제 지정
+        putClientProperty("TabbedPane.tabAreaBackground", BG_PANEL)
+        putClientProperty("TabbedPane.selectedBackground", BG)
     }
 
     private var activeTabIndex: Int = 0
@@ -58,6 +61,15 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
     init {
         background = BG
         border     = null
+        // 탭 스트립 색상을 UIManager에서도 오버라이드
+        javax.swing.UIManager.put("TabbedPane.background",          BG_PANEL)
+        javax.swing.UIManager.put("TabbedPane.foreground",          FG)
+        javax.swing.UIManager.put("TabbedPane.selected",            BG)
+        javax.swing.UIManager.put("TabbedPane.tabAreaBackground",   BG_PANEL)
+        javax.swing.UIManager.put("TabbedPane.darkShadow",          BORDER)
+        javax.swing.UIManager.put("TabbedPane.shadow",              BORDER)
+        javax.swing.UIManager.put("TabbedPane.highlight",           BG_PANEL)
+        javax.swing.UIManager.put("TabbedPane.light",               BG_PANEL)
         add(tabbedPane, BorderLayout.CENTER)
         addWelcomeTab()
     }
@@ -126,12 +138,13 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
 
     /** 닫기 버튼 없는 일반 탭 헤더 (홈 탭용) */
     private fun makePlainHeader(title: String): JPanel =
-        JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque   = false
+        JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+            isOpaque   = true
             background = BG_PANEL
+            border     = BorderFactory.createEmptyBorder(2, 4, 2, 4)
             add(JLabel(title).apply {
                 foreground = FG
-                font       = font.deriveFont(12f)
+                font       = font.deriveFont(Font.PLAIN, 12f)
             })
         }
 
@@ -140,14 +153,15 @@ class NikuToolWindowPanel : JPanel(BorderLayout()) {
      * 다크 배경 고정: foreground = #cccccc, 닫기 버튼 = #999999
      */
     private fun makeCloseableHeader(title: String, closeable: Boolean): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-            isOpaque   = false
+        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 2, 2)).apply {
+            isOpaque   = true
             background = BG_PANEL
+            border     = BorderFactory.createEmptyBorder(2, 4, 2, 2)
         }
 
         val label = JLabel(title).apply {
             foreground = FG
-            font       = font.deriveFont(12f)
+            font       = font.deriveFont(Font.PLAIN, 12f)
         }
 
         panel.add(label)
